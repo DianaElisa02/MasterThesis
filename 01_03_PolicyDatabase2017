@@ -1,0 +1,1097 @@
+from __future__ import annotations
+
+from pathlib import Path
+import logging
+import math
+import pandas as pd
+import numpy as np
+
+BASE_PATH = Path(r"C:/Users/diana/Documents/Master-Policy Economics/Thesis")
+
+POLICY_DIR = BASE_PATH / "policy_db"
+POLICY_DIR.mkdir(parents=True, exist_ok=True)
+
+ANALYSIS_YEARS = [2017, 2018, 2019]
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+def expand_years(
+    df: pd.DataFrame,
+    years: list[int],
+    source_year: int,
+    assumption_note: str
+) -> pd.DataFrame:
+    """Replicate a cross-section across analysis years."""
+    out = df.merge(pd.DataFrame({"year": years}), how="cross")
+    out["source_year"] = source_year
+    out["assumption_no_change"] = True
+    out["assumption_note"] = assumption_note
+
+    cols = out.columns.tolist()
+    if "source_year" in cols and "year" in cols:
+        cols.remove("year")
+        insert_pos = cols.index("source_year") + 1
+        cols = cols[:insert_pos] + ["year"] + cols[insert_pos:]
+        out = out[cols]
+
+    return out
+
+
+def save_parquet_csv(df: pd.DataFrame, stem: str) -> None:
+    df.to_parquet(POLICY_DIR / f"{stem}.parquet", index=False)
+    df.to_csv(POLICY_DIR / f"{stem}.csv", index=False)
+
+
+def ensure_no_missing_nuts(df: pd.DataFrame, name: str) -> None:
+    if "nuts_code" not in df.columns:
+        raise ValueError(f"{name}: expected column 'nuts_code' not found.")
+    if df["nuts_code"].isna().any():
+        cols = [c for c in ["region_name_policy", "program_name"] if c in df.columns]
+        bad = df.loc[df["nuts_code"].isna(), cols].drop_duplicates()
+        raise ValueError(
+            f"{name}: missing nuts_code after region merge.\n"
+            f"{bad.to_string(index=False)}"
+        )
+
+
+def ensure_unique_keys(df: pd.DataFrame, keys: list[str], name: str) -> None:
+    dup = df.duplicated(subset=keys, keep=False)
+    if dup.any():
+        sample = df.loc[dup, keys].drop_duplicates().head(10)
+        raise ValueError(
+            f"{name}: duplicate keys found for {keys}.\n"
+            f"{sample.to_string(index=False)}"
+        )
+
+
+def get_schedule_amount(
+    nuts_code: str,
+    hh_size: int,
+    schedule_df: pd.DataFrame,
+    year: int
+) -> float:
+    """
+    Simple lookup helper for baseline schedule tables.
+    Returns NaN if the region-year is not in the simple schedule baseline.
+    """
+    sub = schedule_df.loc[
+        (schedule_df["nuts_code"] == nuts_code) &
+        (schedule_df["year"] == year)
+    ].copy()
+
+    if sub.empty:
+        return math.nan
+
+    row = sub.loc[sub["hh_size"] == hh_size]
+
+    if len(row) > 1:
+        raise ValueError(
+            f"Duplicate schedule rows for nuts_code={nuts_code}, year={year}, hh_size={hh_size}"
+        )
+
+    if not row.empty:
+        return float(row["guaranteed_amount"].iloc[0])
+
+    # If hh_size is larger than listed schedule, return NaN here.
+    # The simulation script should decide what to do with "above listed size".
+    return math.nan
+
+region_lookup = pd.DataFrame({
+    "region_name_policy": [
+        "Andalusia", "Aragon", "Asturias", "Balearic Islands",
+        "Canary Islands", "Cantabria", "Castilla-La Mancha",
+        "Castilla y Leon", "Catalonia", "Ceuta", "Extremadura",
+        "Galicia", "Madrid", "Melilla", "Murcia", "Navarra",
+        "Basque Country", "La Rioja", "Valencia"
+    ],
+    "nuts_code": [
+        "ES61", "ES24", "ES12", "ES53", "ES70", "ES13", "ES42",
+        "ES41", "ES51", "ES63", "ES43", "ES11", "ES30", "ES64",
+        "ES62", "ES22", "ES21", "ES23", "ES52"
+    ]
+})
+
+ensure_unique_keys(region_lookup, ["region_name_policy"], "region_lookup")
+ensure_unique_keys(region_lookup, ["nuts_code"], "region_lookup")
+
+amount_rows: list[dict] = []
+
+
+def add_amount_schedule(
+    region_name_policy: str,
+    program_name: str,
+    hh_sizes: list[int | None],
+    guaranteed_amounts: list[float | None],
+    max_amount: float,
+    hh_rule_type: str,
+    simple_schedule: bool,
+    amount_simulable: bool,
+    amount_simulation_notes: str | None,
+    source: str,
+    notes: str | None
+) -> None:
+    if len(hh_sizes) != len(guaranteed_amounts):
+        raise ValueError(
+            f"{region_name_policy}: hh_sizes and guaranteed_amounts have different lengths "
+            f"({len(hh_sizes)} vs {len(guaranteed_amounts)})"
+        )
+
+    for hh_size, guaranteed_amount in zip(hh_sizes, guaranteed_amounts):
+        amount_rows.append({
+            "region_name_policy": region_name_policy,
+            "program_name": program_name,
+            "hh_size": hh_size,
+            "guaranteed_amount": guaranteed_amount,
+            "max_amount": max_amount,
+            "hh_rule_type": hh_rule_type,
+            "simple_schedule": simple_schedule,
+            "amount_simulable": amount_simulable,
+            "amount_simulation_notes": amount_simulation_notes,
+            "source": source,
+            "notes": notes
+        })
+
+
+add_amount_schedule(
+    "Andalusia",
+    "Ingreso Mínimo de Solidaridad",
+    [1, 2, 3, 4, 5, 6, 7],
+    [406.22, 406.22, 458.64, 511.06, 563.48, 615.90, 655.20],
+    655.20,
+    "size_schedule",
+    True,
+    True,
+    None,
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    None
+)
+
+add_amount_schedule(
+    "Aragon",
+    "Ingreso Aragonés de Inserción",
+    [1, 2, 3, 4, 5, 6],
+    [472.00, 613.60, 708.00, 802.40, 849.60, 896.80],
+    896.80,
+    "size_schedule",
+    True,
+    True,
+    "Apply cap at 896.80",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Apply cap at 896.80"
+)
+
+add_amount_schedule(
+    "Asturias",
+    "Salario Social Básico",
+    [1, 2, 3, 4, 5, 6],
+    [442.96, 540.41, 611.28, 682.14, 713.16, 730.88],
+    730.88,
+    "size_schedule",
+    True,
+    True,
+    "Possible extra increase in disability/dependency cases not simulated",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Report also mentions 5% increase in some disability/dependency cases"
+)
+
+add_amount_schedule(
+    "Balearic Islands",
+    "Renta Social Garantizada",
+    [1, 2, 3, 4, 5, 6, 7],
+    [430.36, 430.36, 559.47, 645.54, 688.58, 731.61, 774.65],
+    776.58,
+    "size_schedule",
+    True,
+    True,
+    "Using later 2017 RESOGA regime",
+    "Dato sulla RMI 2017.pdf - Cuadro 2 / Cuadro 13 notes",
+    "2017 coexistence with RMI; using later 2017 guaranteed-income regime by assumption"
+)
+
+add_amount_schedule(
+    "Canary Islands",
+    "Prestación Canaria de Inserción",
+    [1, 2, 3, 4, 5, 6, 7],
+    [476.88, 476.88, 539.63, 589.83, 621.20, 646.30, 665.13],
+    665.13,
+    "size_schedule",
+    True,
+    True,
+    "IPREM-based unit-size schedule; 7+ treated as top bracket / cap.",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Unidad convivencial; all employable members must be registered as jobseekers."
+)
+
+add_amount_schedule(
+    "Cantabria",
+    "Renta Social Básica",
+    [1, 2, 3, 4, 5],
+    [430.27, 430.27, 537.84, 591.63, 650.79],
+    672.30,
+    "size_schedule",
+    True,
+    True,
+    "Later 2017 values after update",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Later 2017 values after update"
+)
+
+add_amount_schedule(
+    "Castilla-La Mancha",
+    "Ingreso Mínimo de Solidaridad",
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    [420.42, 420.42, 470.87, 521.32, 571.77, 622.22, 672.67, 723.12],
+    723.12,
+    "size_schedule",
+    True,
+    True,
+    "Family-size table; 8-member amount explicitly listed.",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Unidad familiar; report does not provide full legal mapping from survey household to benefit unit."
+)
+
+add_amount_schedule(
+    "Castilla y Leon",
+    "Renta Garantizada de Ciudadanía",
+    [1, 2, 3, 4, 5, 6],
+    [430.27, 537.84, 602.38, 645.41, 688.44, 699.19],
+    699.19,
+    "size_schedule",
+    True,
+    True,
+    "Later 2017 values after update",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Later 2017 values after update"
+)
+
+add_amount_schedule(
+    "Catalonia",
+    "Renta Garantizada de Ciudadanía (RGC)",
+    [1, 2, 3, 4, 5],
+    [564.00, 836.00, 909.00, 982.00, 1062.00],
+    1062.00,
+    "size_schedule",
+    True,
+    True,
+    "Using RGC from late 2017 onward by assumption",
+    "Dato sulla RMI 2017.pdf - Cuadro 13 notes",
+    "During 2017 RMI and RGC coexist; using RGC from 2017 onward"
+)
+
+add_amount_schedule(
+    "Ceuta",
+    "Ingreso Mínimo de Inserción Social",
+    [1, 2, 3, 4, 5],
+    [300.00, 330.00, 360.00, 390.00, 420.00],
+    420.00,
+    "size_schedule",
+    True,
+    True,
+    None,
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    None
+)
+
+add_amount_schedule(
+    "Extremadura",
+    "Renta Básica Extremeña de Inserción",
+    [1, 2, 3, 4, 5, 6, 7],
+    [430.27, 430.27, 537.84, 591.62, 645.41, 672.30, 699.19],
+    726.08,
+    "size_schedule",
+    True,
+    True,
+    None,
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    None
+)
+
+add_amount_schedule(
+    "Galicia",
+    "Renta de Inclusión Social (RISGA)",
+    [1, 2, 3, 4],
+    [403.38, 478.68, 543.22, 597.00],
+    726.08,
+    "size_schedule",
+    True,
+    True,
+    "Larger household sizes may need cap logic",
+    "Dato sulla RMI 2017.pdf - Cuadro 8 / notes",
+    "Later 2017 values after update; larger sizes may need cap logic"
+)
+
+add_amount_schedule(
+    "Madrid",
+    "Renta Mínima de Inserción",
+    [1, 2, 3],
+    [400.00, 512.67, 587.78],
+    707.70,
+    "size_schedule",
+    True,
+    True,
+    "Partial schedule; larger sizes use cap",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Partial schedule; larger sizes use cap"
+)
+
+add_amount_schedule(
+    "Melilla",
+    "Ingreso Melillense de Integración / Prestación Básica Familiar",
+    [1, 2, 3, 4, 5],
+    [458.64, 535.08, 611.52, 687.96, 764.40],
+    764.40,
+    "size_schedule",
+    True,
+    True,
+    "Combined representation for 2017",
+    "Dato sulla RMI 2017.pdf - Cuadro 13 notes",
+    "Combined representation for 2017"
+)
+
+add_amount_schedule(
+    "Murcia",
+    "Renta Básica de Inserción",
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    [430.27, 430.27, 537.84, 591.62, 644.40, 687.43, 730.46, 806.76],
+    806.76,
+    "size_schedule",
+    True,
+    True,
+    "Using reported Murcia schedule as operational proxy; 8+ treated as top bracket/cap.",
+    "Informe_2018.pdf - Cuadro 2 / informe-rrmm-19.pdf - Cuadro 3-4",
+    "Operational proxy for pre-2020 simulation; Murcia treated as listed schedule region instead of excluded formula region."
+)
+
+add_amount_schedule(
+    "Navarra",
+    "Renta Garantizada",
+    [1, 2, 3, 4, 5, 6, 7],
+    [600.00, 600.00, 810.00, 960.00, 1050.00, 1140.00, 1200.00],
+    1200.00,
+    "size_schedule",
+    True,
+    True,
+    None,
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    None
+)
+
+add_amount_schedule(
+    "Basque Country",
+    "Renta de Garantía de Ingresos",
+    [1, 2, 3, 4],
+    [634.97, 634.97, 815.36, 901.94],
+    901.94,
+    "size_schedule",
+    True,
+    True,
+    "Table amounts used; supplements not simulated",
+    "Dato sulla RMI 2017.pdf - Cuadro 8 / Cuadro 13",
+    "Report mentions supplements; stored amounts are table amounts"
+)
+
+add_amount_schedule(
+    "La Rioja",
+    "Renta de Ciudadanía",
+    [1, 2, 3, 4],
+    [430.27, 537.84, 618.52, 672.30],
+    672.30,
+    "size_schedule",
+    True,
+    True,
+    "Using RC from late 2017 onward by assumption",
+    "Dato sulla RMI 2017.pdf - Cuadro 13 notes",
+    "2017 coexistence with IMI/AIS; using RC from 2017 onward"
+)
+
+add_amount_schedule(
+    "Valencia",
+    "Renta Garantizada de Ciudadanía",
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    [388.51, 388.51, 419.84, 438.64, 457.44, 476.24, 495.04, 513.84],
+    623.03,
+    "size_schedule",
+    True,
+    True,
+    "Partial schedule; cap applies",
+    "Dato sulla RMI 2017.pdf - Cuadro 2",
+    "Partial schedule; cap applies"
+)
+
+rmi_amounts_2017 = pd.DataFrame(amount_rows).merge(
+    region_lookup,
+    on="region_name_policy",
+    how="left",
+    validate="m:1"
+)
+
+ensure_no_missing_nuts(rmi_amounts_2017, "rmi_amounts_2017")
+ensure_unique_keys(
+    rmi_amounts_2017,
+    ["region_name_policy", "program_name", "hh_size"],
+    "rmi_amounts_2017"
+)
+
+rmi_amounts_2017["simulation_period"] = "pre_2020"
+rmi_amounts_2017["resource_concept_simulation"] = "income_before_transfers_monthly"
+rmi_amounts_2017["household_size_variable_simulation"] = "household_size"
+rmi_amounts_2017["amount_rule_for_simulation"] = "regional_guaranteed_amount_schedule"
+rmi_amounts_2017["separate_formula_required"] = ~rmi_amounts_2017["simple_schedule"].fillna(False)
+
+rmi_amounts_full = expand_years(
+    rmi_amounts_2017,
+    years=ANALYSIS_YEARS,
+    source_year=2017,
+    assumption_note="2017 parameters carried forward to 2018-2019"
+)
+
+rmi_eligibility_2017 = pd.DataFrame({
+    "region_name_policy": [
+        "Andalusia", "Aragon", "Asturias", "Balearic Islands", "Canary Islands",
+        "Cantabria", "Castilla-La Mancha", "Castilla y Leon", "Catalonia",
+        "Ceuta", "Extremadura", "Galicia", "Madrid", "Melilla", "Murcia",
+        "Navarra", "Basque Country", "La Rioja", "Valencia"
+    ],
+    "program_name": [
+        "Ingreso Mínimo de Solidaridad",
+        "Ingreso Aragonés de Inserción",
+        "Salario Social Básico",
+        "Renta Social Garantizada",
+        "Prestación Canaria de Inserción",
+        "Renta Social Básica",
+        "Ingreso Mínimo de Solidaridad",
+        "Renta Garantizada de Ciudadanía",
+        "Renta Garantizada de Ciudadanía (RGC)",
+        "Ingreso Mínimo de Inserción Social",
+        "Renta Básica Extremeña de Inserción",
+        "Renta de Inclusión Social (RISGA)",
+        "Renta Mínima de Inserción",
+        "Ingreso Melillense de Integración / Prestación Básica Familiar",
+        "Renta Básica de Inserción",
+        "Renta Garantizada",
+        "Renta de Garantía de Ingresos",
+        "Renta de Ciudadanía",
+        "Renta Garantizada de Ciudadanía"
+    ],
+    "minimum_age": [25, 18, 25, 25, 25, 23, 25, 25, 25, 25, 25, 25, 25, 25, 25, 18, 23, 23, 23],
+    "maximum_age": [65, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+    "age_exceptions": [
+        None,
+        "Minors with dependent minors or disability",
+        "18+ under specific circumstances",
+        None,
+        None,
+        None,
+        None,
+        "18+ emancipated / victims / exceptions",
+        "18+ with children / exceptions",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "18+ emancipated with children / young one-person special rule",
+        None,
+        None,
+        "18+ with children"
+    ],
+    "unit_duration_months_required": [12, 0, 6, 6, 0, 12, 12, 0, 12, 6, 0, 0, 6, 18, 0, 0, 12, 12, 24],
+    "empadronamiento_months_required": [12, 12, 0, 0, 12, 12, 24, 12, 0, 0, 12, 6, 12, 36, 12, 24, 12, 12, 24],
+    "residence_months_required": [12, 12, 24, 36, 12, 12, 24, 12, 24, 12, 12, 6, 12, 36, 60, 24, 36, 12, 24],
+    "employment_rule_scope": [
+        "titular_or_adult_members_registration_required",
+        "unknown_from_summary",
+        "registration_required_with_exceptions",
+        "no_registration_requirement",
+        "all_employable_members_registered",
+        "registration_required",
+        "registration_required_with_exceptions",
+        "registration_required_with_exceptions",
+        "no_registration_requirement",
+        "registration_required",
+        "not_prior_requirement",
+        "registration_required_with_exceptions",
+        "no_registration_requirement",
+        "registration_required",
+        "no_registration_requirement",
+        "registration_required",
+        "registration_required_with_exceptions",
+        "mixed_by_scheme",
+        "no_registration_requirement"
+    ],
+    "activation_required": [
+        True, True, True, False, True, True, True, True, True,
+        True, True, True, True, True, True, True, True, True, True
+    ],
+    "activation_scope": [
+        "adult_members",
+        "titular_or_family",
+        "titular_with_exemptions",
+        "not_required_under_rsg",
+        "all_unit_members",
+        "titular_or_unit_members",
+        "titular_and_family",
+        "beneficiaries",
+        "titular",
+        "titular_or_unit_members",
+        "titular_and_family",
+        "titular_and_family",
+        "titular_and_adult_unit_members",
+        "titular_and_unit_members",
+        "titular_and_unit_members",
+        "inclusion_pathway",
+        "titular_and_unit_members",
+        "titular_with_employment_system",
+        "titular_and_unit_members"
+    ],
+    "legal_unit_type": [
+        "unidad_familiar",
+        "unidad_familiar",
+        "unidad_convivencia_proxy",
+        "unidad_convivencia_proxy",
+        "unidad_convivencial",
+        "unidad_convivencia",
+        "unidad_familiar",
+        "unidad_convivencia_proxy",
+        "unidad_familiar_proxy",
+        "unidad_convivencia",
+        "unidad_familiar_proxy",
+        "unidad_familiar_proxy",
+        "unidad_convivencia",
+        "unidad_convivencia",
+        "unidad_de_convivencia",
+        "unidad_familiar_proxy",
+        "unidad_convivencia",
+        "unidad_familiar_proxy",
+        "unidad_convivencia"
+    ],
+    "income_test_rule": ["Guaranteed amount minus observed resources"] * 19,
+    "income_threshold_type": [
+        "family_size_schedule", "family_size_schedule", "family_size_schedule",
+        "family_size_schedule", "family_size_schedule", "family_size_schedule",
+        "family_size_schedule", "family_size_schedule", "family_size_schedule",
+        "family_size_schedule", "family_size_schedule", "family_size_schedule",
+        "family_size_schedule", "family_size_schedule", "formula_gap",
+        "family_size_schedule", "family_size_schedule", "family_size_schedule",
+        "family_size_schedule"
+    ],
+    "asset_rule_type": [
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_patrimony",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "explicit_wealth_rule_available",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_possible_assets",
+        "resources_and_patrimonial_income"
+    ],
+    "asset_ecv_strategy": ["pre2020_rental_income_capital_income_hy120g_proxy"] * 19,
+    "asset_rule_detail_available": [
+        False, False, False, False, False, False, False, False, False,
+        False, False, False, False, False, True, False, False, False, False
+    ],
+    "source": ["Dato sulla RMI 2017.pdf - Cuadro 3-2 / Cuadro 4"] * 19,
+    "notes": [
+        "Adults 18+ in family unit may be bound by insertion commitment",
+        "Employment-registration requirement not cleanly pinned down from summary table",
+        "Registration required with pension/disability exceptions",
+        "Using later-2017 RSG regime",
+        "All employable unit members must be registered",
+        "Joining-member unit-duration rule may matter",
+        "Violence-against-women exception on employment registration",
+        "Residence and registration exceptions exist",
+        "No employment-registration requirement in summary table",
+        "Non-EU residence extension not simulated separately",
+        "Employment registration not a prior requirement",
+        "Registration required in some cases / exceptions",
+        "No employment-registration requirement in summary table",
+        None,
+        "Murcia corrected: 5 years residence and no registration requirement",
+        "Young one-person special rule not fully simulated",
+        "Long residence rule with exceptions",
+        "La Rioja mixed by scheme",
+        "No employment-registration requirement in summary table"
+    ]
+}).merge(
+    region_lookup,
+    on="region_name_policy",
+    how="left",
+    validate="m:1"
+)
+
+ensure_no_missing_nuts(rmi_eligibility_2017, "rmi_eligibility_2017")
+ensure_unique_keys(rmi_eligibility_2017, ["region_name_policy"], "rmi_eligibility_2017")
+
+rmi_eligibility_2017["simulation_period"] = "pre_2020"
+rmi_eligibility_2017["resource_concept_simulation"] = "income_before_transfers_monthly"
+rmi_eligibility_2017["wealth_proxy_available_pre2020"] = True
+rmi_eligibility_2017["wealth_proxy_strategy_pre2020"] = "rental_income_capital_income_hy120g"
+rmi_eligibility_2017["labour_proxy_strategy_pre2020"] = "observable_labour_status_proxy"
+rmi_eligibility_2017["residence_conditions_imposed_in_simulation"] = False
+rmi_eligibility_2017["activation_conditions_imposed_in_simulation"] = False
+rmi_eligibility_2017["exact_legal_unit_observed"] = False
+rmi_eligibility_2017["simulation_note_pre2020"] = (
+    "Full metadata table. Non-observed legal restrictions are documented but not intended "
+    "to mechanically drive the main baseline entitlement simulation."
+)
+
+rmi_eligibility_full = expand_years(
+    rmi_eligibility_2017,
+    years=ANALYSIS_YEARS,
+    source_year=2017,
+    assumption_note="2017 parameters carried forward to 2018-2019"
+)
+
+rmi_coverage = pd.DataFrame({
+    "region_name_policy": [
+        "Andalusia", "Aragon", "Asturias", "Balearic Islands", "Canary Islands",
+        "Cantabria", "Castilla-La Mancha", "Castilla y Leon", "Catalonia",
+        "Ceuta", "Extremadura", "Galicia", "Madrid", "Melilla", "Murcia",
+        "Navarra", "Basque Country", "La Rioja", "Valencia",
+
+        "Andalusia", "Aragon", "Asturias", "Balearic Islands", "Canary Islands",
+        "Cantabria", "Castilla-La Mancha", "Castilla y Leon", "Catalonia",
+        "Ceuta", "Extremadura", "Galicia", "Madrid", "Melilla", "Murcia",
+        "Navarra", "Basque Country", "La Rioja", "Valencia",
+
+        "Andalusia", "Aragon", "Asturias", "Balearic Islands", "Canary Islands",
+        "Cantabria", "Castilla-La Mancha", "Castilla y Leon", "Catalonia",
+        "Ceuta", "Extremadura", "Galicia", "Madrid", "Melilla", "Murcia",
+        "Navarra", "Basque Country", "La Rioja", "Valencia"
+    ],
+    "year": [
+        2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017,
+        2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017,
+
+        2018, 2018, 2018, 2018, 2018, 2018, 2018, 2018, 2018, 2018,
+        2018, 2018, 2018, 2018, 2018, 2018, 2018, 2018, 2018,
+
+        2019, 2019, 2019, 2019, 2019, 2019, 2019, 2019, 2019, 2019,
+        2019, 2019, 2019, 2019, 2019, 2019, 2019, 2019, 2019
+    ],
+    "population_reference": [
+        8379820, 1308750, 1034960, 1115999, 2108121, 580295, 2031479,
+        2425801, 7555830, 84959, 1079920, 2708339, 6507184, 86120,
+        1470273, 643234, 2194158, 315381, 4941509,
+
+        np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
+        np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
+        np.nan, np.nan, np.nan, np.nan, np.nan,
+
+        np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
+        np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
+        np.nan, np.nan, np.nan, np.nan, np.nan
+    ],
+    "titulares": [
+        29337, 10466, 22219, 7551, 13525, 6366, 3152, 15502, 26311, 263,
+        6316, 14468, 35483, 994, 5421, 15918, 76188, 2424, 21387,
+
+        17883, 9894, 22305, 9714, 11592, 5365, 3544, 14536, 28572, 266,
+        5982, 14238, 33000, 784, 5856, 16078, 72341, 2941, 18411,
+
+        22318, 9401, 21884, 10449, 9973, 7052, 4132, 13069, 32166, 179,
+        7991, 13600, 28643, 510, 6355, 15712, 66508, 3070, 24108
+    ],
+    "total_perceptors": [
+        102680, 25183, 68357, 13154, 25369, 14147, 11146, 36643, 67985, 967,
+        16853, 30512, 117420, 3855, 13649, 35514, 142029, 2424, 51312,
+
+        40870, 23428, 45511, 24824, 20792, 11286, 8371, 33497, 99682, 951,
+        21099, 29694, 106746, 3001, 14489, 36303, 120606, 2941, 35089,
+
+        75539, 31520, 34821, 26428, 17317, 12849, 10246, 30007, 108001, 640,
+        20136, 27538, 91076, 1875, 15479, 35899, 111318, 3070, 43365
+    ],
+    "validation_reference": (
+        ["administrative_2017"] * 19 +
+        ["administrative_2018"] * 19 +
+        ["administrative_2019"] * 19
+    ),
+    "source_year": (
+        [2017] * 19 +
+        [2018] * 19 +
+        [2019] * 19
+    ),
+    "assumption_no_change": [False] * 57,
+    "assumption_note": (
+        ["Observed administrative counts for 2017"] * 19 +
+        ["Observed administrative counts for 2018"] * 19 +
+        ["Observed administrative counts for 2019"] * 19
+    )
+}).merge(
+    region_lookup,
+    on="region_name_policy",
+    how="left",
+    validate="m:1"
+)
+
+ensure_no_missing_nuts(rmi_coverage, "rmi_coverage")
+ensure_unique_keys(rmi_coverage, ["region_name_policy", "year"], "rmi_coverage")
+
+rmi_coverage["simulation_period"] = "pre_2020"
+
+rmi_coverage["coverage_rate_titular_pct"] = np.where(
+    rmi_coverage["population_reference"].notna(),
+    rmi_coverage["titulares"] / rmi_coverage["population_reference"] * 100,
+    np.nan
+)
+
+rmi_coverage["coverage_rate_total_pct"] = np.where(
+    rmi_coverage["population_reference"].notna(),
+    rmi_coverage["total_perceptors"] / rmi_coverage["population_reference"] * 100,
+    np.nan
+)
+
+OUTPUT_COVERAGE = POLICY_DIR / "rmi_coverage_reference.parquet"
+rmi_coverage.to_parquet(OUTPUT_COVERAGE, index=False)
+print(f"Saved coverage reference to {OUTPUT_COVERAGE}")
+
+baseline_rules_2017 = pd.DataFrame({
+    "region_name_policy": [
+        "Andalusia", "Aragon", "Asturias", "Balearic Islands", "Canary Islands",
+        "Cantabria", "Castilla-La Mancha", "Castilla y Leon", "Catalonia",
+        "Ceuta", "Extremadura", "Galicia", "Madrid", "Melilla", "Murcia",
+        "Navarra", "Basque Country", "La Rioja", "Valencia"
+    ],
+    "baseline_age_threshold": [
+        25, 18, 25, 25, 25, 23, 25, 25, 25, 25, 25, 25, 25, 25, 25, 18, 23, 23, 23
+    ],
+    "baseline_claim_unit": ["restricted_household_proxy"] * 19,
+    "baseline_resource_concept": ["income_before_transfers_monthly"] * 19,
+    "baseline_wealth_test": ["proxy_asset_exclusion_strict"] * 19,
+    "baseline_labour_test": ["none"] * 19,
+    "baseline_age_rule_type": ["responsible_person_then_household_fallback"] * 19,
+    "baseline_allowed_hh_types": [
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Andalusia
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Aragon
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Asturias
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Balearic Islands
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Canary Islands
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Cantabria
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Castilla-La Mancha
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Castilla y Leon
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Catalonia
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Ceuta
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Extremadura
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Galicia
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Madrid
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Melilla
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Murcia
+        "all_household_types",                                             # Navarra
+        "all_household_types",                                             # Basque Country
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # La Rioja
+        "single_adult_single_parent_two_adults_plus_restricted_threeplus",  # Valencia
+    ],
+    "baseline_exclude_threeplus_adults": [False] * 19,
+        "baseline_threeplus_rule": [
+        "exclude_if_multi_nucleus_proxy",  # Andalusia
+        "exclude_if_multi_nucleus_proxy",  # Aragon
+        "exclude_if_multi_nucleus_proxy",  # Asturias
+        "exclude_if_multi_nucleus_proxy",  # Balearic Islands
+        "exclude_if_multi_nucleus_proxy",  # Canary Islands
+        "exclude_if_multi_nucleus_proxy",  # Cantabria
+        "exclude_if_multi_nucleus_proxy",  # Castilla-La Mancha
+        "exclude_if_multi_nucleus_proxy",  # Castilla y Leon
+        "exclude_if_multi_nucleus_proxy",  # Catalonia
+        "exclude_if_multi_nucleus_proxy",  # Ceuta
+        "exclude_if_multi_nucleus_proxy",  # Extremadura
+        "exclude_if_multi_nucleus_proxy",  # Galicia
+        "exclude_if_multi_nucleus_proxy",  # Madrid
+        "exclude_if_multi_nucleus_proxy",  # Melilla
+        "exclude_if_multi_nucleus_proxy",  # Murcia
+        "allow_all",                       # Navarra
+        "allow_all",                       # Basque Country
+        "exclude_if_multi_nucleus_proxy",  # La Rioja
+        "exclude_if_multi_nucleus_proxy",  # Valencia
+    ],
+
+    "baseline_nonobservable_conditions_ignored": [True] * 19,
+    "baseline_restricted_design": [True] * 19,
+    "baseline_restriction_rationale": [
+        "Restricted baseline to reduce oversimulation when exact legal claim unit is not observed"
+    ] * 19,
+
+    # New operational controls for region-specific simulation behavior
+    "baseline_conditionality_profile": [
+        "strict",          # Andalusia
+        "standard",        # Aragon
+        "standard",        # Asturias
+        "guaranteed_soft", # Balearic Islands
+        "strict",          # Canary Islands
+        "standard",        # Cantabria
+        "strict",          # Castilla-La Mancha
+        "soft",            # Castilla y Leon
+        "standard",        # Catalonia
+        "standard",        # Ceuta
+        "standard",        # Extremadura
+        "standard",        # Galicia
+        "standard",        # Madrid
+        "standard",        # Melilla
+        "soft",         # Murcia
+        "guaranteed_soft", # Navarra
+        "guaranteed_soft", # Basque Country
+        "mixed",           # La Rioja
+        "standard",        # Valencia
+    ],
+    "baseline_apply_active_inclusion_gate": [
+        True,   # Andalusia
+        True,   # Aragon
+        True,   # Asturias
+        False,  # Balearic Islands
+        True,   # Canary Islands
+        True,   # Cantabria
+        True,   # Castilla-La Mancha
+        False,  # Castilla y Leon
+        True,   # Catalonia
+        True,   # Ceuta
+        True,   # Extremadura
+        True,   # Galicia
+        True,   # Madrid
+        True,   # Melilla
+        False,  # Murcia
+        False,  # Navarra
+        False,  # Basque Country
+        False,  # La Rioja
+        True,   # Valencia
+    ],
+    "baseline_relax_labour_gate": [
+        False,  # Andalusia
+        False,  # Aragon
+        False,  # Asturias
+        True,   # Balearic Islands
+        False,  # Canary Islands
+        False,  # Cantabria
+        False,  # Castilla-La Mancha
+        True,   # Castilla y Leon
+        False,  # Catalonia
+        False,  # Ceuta
+        False,  # Extremadura
+        False,  # Galicia
+        False,  # Madrid
+        False,  # Melilla
+        True,   # Murcia
+        True,   # Navarra
+        True,   # Basque Country
+        False,  # La Rioja
+        False,  # Valencia
+    ],
+    "baseline_non_takeup_group": [
+        "high",    # Andalusia
+        "none",    # Aragon
+        "none",    # Asturias
+        "none",    # Balearic Islands
+        "high",    # Canary Islands
+        "none",    # Cantabria
+        "high",    # Castilla-La Mancha
+        "none",    # Castilla y Leon
+        "medium",  # Catalonia
+        "none",    # Ceuta
+        "medium",  # Extremadura
+        "medium",  # Galicia
+        "none",    # Madrid
+        "none",    # Melilla
+        "none",    # Murcia
+        "none",    # Navarra
+        "none",    # Basque Country
+        "none",    # La Rioja
+        "medium",  # Valencia
+    ],
+    "baseline_scheme_structure": [
+        "classic_rmi",                           # Andalusia
+        "classic_rmi",                           # Aragon
+        "classic_rmi",                           # Asturias
+        "coexisting_rmi_resoga",                 # Balearic Islands
+        "classic_rmi",                           # Canary Islands
+        "classic_rmi",                           # Cantabria
+        "classic_rmi",                           # Castilla-La Mancha
+        "guaranteed_income",                     # Castilla y Leon
+        "transition_to_rgc",                     # Catalonia
+        "classic_rmi",                           # Ceuta
+        "classic_rmi",                           # Extremadura
+        "classic_rmi",                           # Galicia
+        "classic_rmi",                           # Madrid
+        "classic_rmi",                           # Melilla
+        "classic_rmi",                        # Murcia
+        "guaranteed_income",                     # Navarra
+        "guaranteed_income_plus_supplements",    # Basque Country
+        "mixed_schemes",                         # La Rioja
+        "classic_rmi",                           # Valencia
+    ],
+
+        "baseline_amount_topup_factor": [
+        1.00,  # Andalusia
+        1.00,  # Aragon
+        1.00,  # Asturias
+        1.00,  # Balearic Islands
+        1.00,  # Canary Islands
+        1.00,  # Cantabria
+        1.00,  # Castilla-La Mancha
+        1.00,  # Castilla y Leon
+        1.00,  # Catalonia
+        1.00,  # Ceuta
+        1.00,  # Extremadura
+        1.00,  # Galicia
+        1.00,  # Madrid
+        1.00,  # Melilla
+        1.00,  # Murcia
+        1.00,  # Navarra
+        1.15,  # Basque Country
+        1.00,  # La Rioja
+        1.00,  # Valencia
+    ],
+
+    "baseline_main_included": [
+        True, True, True, True, True, True, True, True, True, True,
+        True, True, True, True, True, True, True, True, True
+    ],
+    "baseline_amount_method": [
+        "simple_schedule", "simple_schedule", "simple_schedule", "simple_schedule",
+        "simple_schedule", "simple_schedule", "simple_schedule", "simple_schedule",
+        "simple_schedule", "simple_schedule", "simple_schedule", "simple_schedule",
+        "simple_schedule", "simple_schedule", "simple_schedule", "simple_schedule",
+        "simple_schedule", "simple_schedule", "simple_schedule"
+    ],
+
+}).merge(
+    region_lookup,
+    on="region_name_policy",
+    how="left",
+    validate="m:1"
+)
+
+ensure_no_missing_nuts(baseline_rules_2017, "baseline_rules_2017")
+ensure_unique_keys(baseline_rules_2017, ["region_name_policy"], "baseline_rules_2017")
+
+baseline_rules = expand_years(
+    baseline_rules_2017,
+    years=ANALYSIS_YEARS,
+    source_year=2017,
+    assumption_note="2017 baseline operational rules carried forward to 2018-2019"
+)
+
+
+baseline_schedule = rmi_amounts_full.loc[
+    rmi_amounts_full["simple_schedule"].fillna(False)
+].copy()
+
+baseline_schedule = baseline_schedule[[
+    "nuts_code",
+    "region_name_policy",
+    "year",
+    "program_name",
+    "hh_size",
+    "guaranteed_amount",
+    "max_amount",
+    "source_year",
+    "assumption_no_change",
+    "assumption_note",
+    "source",
+    "notes"
+]].copy()
+
+baseline_schedule = baseline_schedule.rename(columns={
+    "source": "source_amount",
+    "notes": "notes_amount"
+})
+
+baseline_schedule["schedule_included_main_baseline"] = True
+
+ensure_unique_keys(
+    baseline_schedule,
+    ["nuts_code", "year", "hh_size"],
+    "baseline_schedule"
+)
+
+baseline_amount_summary = (
+    rmi_amounts_full
+    .groupby(["nuts_code", "region_name_policy", "year"], as_index=False)
+    .agg(
+        program_name=("program_name", "first"),
+        simple_schedule=("simple_schedule", "first"),
+        hh_rule_type=("hh_rule_type", "first"),
+        amount_simulable=("amount_simulable", "first"),
+        max_amount=("max_amount", "first"),
+        max_hh_size_listed=("hh_size", lambda x: pd.to_numeric(x, errors="coerce").max()),
+        amount_simulation_notes=("amount_simulation_notes", "first"),
+        source_amount=("source", "first"),
+        notes_amount=("notes", "first"),
+    )
+)
+
+ensure_unique_keys(
+    baseline_amount_summary,
+    ["nuts_code", "year"],
+    "baseline_amount_summary"
+)
+
+baseline_rules = baseline_rules.merge(
+    baseline_amount_summary.drop(columns=["region_name_policy"]),
+    on=["nuts_code", "year"],
+    how="left",
+    validate="1:1"
+)
+
+ensure_unique_keys(baseline_rules, ["nuts_code", "year"], "baseline_rules")
+
+baseline_rules["baseline_has_listed_schedule"] = baseline_rules["simple_schedule"].fillna(False)
+baseline_rules["baseline_formula_region"] = baseline_rules["baseline_amount_method"].eq("formula")
+baseline_rules["baseline_needs_special_handling"] = (
+    (~baseline_rules["baseline_has_listed_schedule"]) |
+    baseline_rules["baseline_formula_region"] |
+    (~baseline_rules["baseline_main_included"].fillna(False))
+)
+
+print("\nPolicy database summary")
+print("=======================")
+print("Regions:", region_lookup["region_name_policy"].nunique())
+print("Analysis years:", ", ".join(map(str, ANALYSIS_YEARS)))
+print("Rows - full amounts:", len(rmi_amounts_full))
+print("Rows - full eligibility:", len(rmi_eligibility_full))
+print("Rows - coverage:", len(rmi_coverage))
+print("Rows - baseline rules:", len(baseline_rules))
+print("Rows - baseline schedule:", len(baseline_schedule))
+
+print("\nMain baseline inclusion by region-year:")
+print(
+    baseline_rules[[
+        "region_name_policy", "year", "baseline_main_included", "baseline_amount_method",
+        "baseline_age_threshold", "max_hh_size_listed",
+        "baseline_apply_active_inclusion_gate", "baseline_relax_labour_gate",
+        "baseline_non_takeup_group"
+    ]]
+    .sort_values(["year", "region_name_policy"])
+    .to_string(index=False)
+)
+
+print("\nSample schedule lookup:")
+sample_amount = get_schedule_amount("ES12", 3, baseline_schedule, 2018)
+print("Asturias, hh_size=3, 2018 ->", sample_amount)
+
+murcia_amount = get_schedule_amount("ES62", 3, baseline_schedule, 2018)
+print("Murcia, hh_size=3, 2018 ->", murcia_amount, "(expected NaN in simple-schedule baseline)")
+
+save_parquet_csv(region_lookup, "region_lookup")
+save_parquet_csv(rmi_amounts_full, "rmi_amounts_full")
+save_parquet_csv(rmi_eligibility_full, "rmi_eligibility_full")
+save_parquet_csv(rmi_coverage, "rmi_coverage")
+save_parquet_csv(baseline_rules, "rmi_baseline_rules")
+save_parquet_csv(baseline_schedule, "rmi_baseline_schedule")
+
+print("\nDone. Files saved.")
+print(f"Policy files saved in: {POLICY_DIR}")

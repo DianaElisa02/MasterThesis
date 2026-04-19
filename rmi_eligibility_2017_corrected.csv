@@ -1,0 +1,20 @@
+region,min_age_standard,exceptions_younger,residency_months,income_test,notes,nuts_code
+Andalusia,25,NA,12,Difference rule: Benefit = Guaranteed - Income,,ES61
+Aragon,18,NA,12,Difference rule: Benefit = Guaranteed - Income,,ES24
+Asturias,25,18+ with children/disability,24,Difference rule: Benefit = Guaranteed - Income,,ES12
+Balearic Islands,25,NA,6,Difference rule: Benefit = Guaranteed - Income,Use later 2017 regime,ES53
+Canary Islands,25,NA,12,Difference rule: Benefit = Guaranteed - Income,,ES70
+Cantabria,23,NA,12,Difference rule: Benefit = Guaranteed - Income,Later 2017 values,ES13
+Castilla-La Mancha,25,NA,24,Difference rule: Benefit = Guaranteed - Income,,ES42
+Castilla y Leon,25,18+ emancipated/victims,12,Difference rule: Benefit = Guaranteed - Income,Later 2017 values,ES41
+Catalonia,25,18+ with children,12,Difference rule: Benefit = Guaranteed - Income,Use RGC from 2017 onward,ES51
+Ceuta,25,NA,12,Difference rule: Benefit = Guaranteed - Income,,ES63
+Extremadura,25,NA,12,Difference rule: Benefit = Guaranteed - Income,,ES43
+Galicia,25,NA,6,Difference rule: Benefit = Guaranteed - Income,Later 2017 values,ES11
+Madrid,25,NA,12,Difference rule: Benefit = Guaranteed - Income,,ES30
+Melilla,25,NA,36,Difference rule: Benefit = Guaranteed - Income,,ES64
+Murcia,25,NA,12,Difference rule: Benefit = Guaranteed - Income,Benefit is formula-based,ES62
+Navarra,18,18+ emancipated with children,24,Difference rule: Benefit = Guaranteed - Income,,ES22
+Basque Country,23,NA,36,Difference rule: Benefit = Guaranteed - Income,,ES21
+La Rioja,23,NA,12,Difference rule: Benefit = Guaranteed - Income,Use RC from 2017 onward,ES23
+Valencia,23,18+ with children,24,Difference rule: Benefit = Guaranteed - Income,,ES52

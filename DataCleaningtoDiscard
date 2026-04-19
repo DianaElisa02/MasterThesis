@@ -1,0 +1,1216 @@
+from __future__ import annotations
+
+from pathlib import Path
+import logging
+
+import numpy as np
+import pandas as pd
+
+
+# =============================================================================
+# CONFIG
+# =============================================================================
+
+BASE_PATH = Path("C:/Users/diana/Documents/Master-Policy Economics/Thesis")
+DATA_PREFIX = "datos_"
+
+DEBUG = False
+YEARS = [2017] if DEBUG else list(range(2017, 2026))
+
+HOUSEHOLD_OUTPUT_PATH = BASE_PATH / "ecv_household_2017_2025_clean.parquet"
+PERSON_OUTPUT_PATH = BASE_PATH / "ecv_person_2017_2025_clean.parquet"
+
+PROCESSED_DIR = BASE_PATH / "processed"
+PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+
+# Set to True when you change the structure of the cleaned files
+FORCE_REBUILD = False
+
+STRICT_PERSON_DATA = True
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# SCHEMA
+# =============================================================================
+
+SCHEMA = {
+    "td": {
+        "household_id": ["DB030"],
+        "region_code": ["DB040"],
+        "weight_hh": ["DB090"],
+    },
+    "th": {
+        "household_id": ["HB030"],
+        "household_size_raw": ["HB120"],
+        "official_hh_type": ["HX060"],
+        "income_after_transfers": ["HY020"],
+        "income_before_transfers": ["HY022"],
+        "capital_income": ["HY090", "HY090N", "HY090G"],
+        "rental_income_gross": ["HY040G"],
+        "mortgage_interest_paid": ["HY100G"],
+        "wealth_tax_paid": ["HY120G"],
+        "tenure_status": ["HH021"],
+        "consumption_units": ["HX240"],
+        "poverty": ["vhPobreza"],
+        "matdep": ["vhMATDEP"],
+        "responsible_person_1": ["HB080"],
+        "responsible_person_2": ["HB090"],
+    },
+    "tr": {
+        "person_id": ["RB030"],
+        "sex": ["RB090"],
+        "partner_id": ["RB240"],
+        "weight_r": ["RB050"],
+        "age_at_interview": ["RB082"],
+        "age_income_ref": ["RB081"],
+        "birth_year": ["RB080"],
+    },
+    "tp": {
+        "person_id": ["PB030", "RB030"],
+        "weight_p": ["PB040"],
+        "weight_selected_resp": ["PB060"],
+        "labour_status": ["PL032"],
+    }
+}
+
+
+# =============================================================================
+# FILE READING
+# =============================================================================
+
+def read_dta_file(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    return pd.read_stata(path, convert_categoricals=False)
+
+
+def make_paths(year: int) -> dict[str, Path]:
+    root = BASE_PATH / f"{DATA_PREFIX}{year}"
+    return {
+        "td": root / f"ECV_Td_{year}" / "STATA" / f"ECV_Td_{year}.dta",
+        "th": root / f"ECV_Th_{year}" / "STATA" / f"ECV_Th_{year}.dta",
+        "tr": root / f"ECV_Tr_{year}" / "STATA" / f"ECV_Tr_{year}.dta",
+        "tp": root / f"ECV_Tp_{year}" / "STATA" / f"ECV_Tp_{year}.dta",
+    }
+
+
+def get_household_cache_path(year: int) -> Path:
+    return PROCESSED_DIR / f"ecv_household_{year}.parquet"
+
+
+def get_person_cache_path(year: int) -> Path:
+    return PROCESSED_DIR / f"ecv_person_{year}.parquet"
+
+
+# =============================================================================
+# GENERIC HELPERS
+# =============================================================================
+
+def empty_num(df: pd.DataFrame) -> pd.Series:
+    return pd.Series(np.nan, index=df.index, dtype="float64")
+
+
+def empty_str(df: pd.DataFrame) -> pd.Series:
+    return pd.Series(pd.NA, index=df.index, dtype="string")
+
+
+def to_num(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
+
+
+def to_id(s: pd.Series) -> pd.Series:
+    s = s.astype("string").str.strip()
+    s = s.str.replace(r"\.0$", "", regex=True)
+    return s
+
+
+def first_existing(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def get_series(
+    df: pd.DataFrame,
+    candidates: list[str],
+    *,
+    as_id: bool = False,
+    numeric: bool = False
+) -> pd.Series:
+    col = first_existing(df, candidates)
+    if col is None:
+        if as_id:
+            return empty_str(df)
+        return empty_num(df) if numeric else empty_str(df)
+
+    s = df[col]
+    if as_id:
+        return to_id(s)
+    if numeric:
+        return to_num(s)
+    return s.astype("string")
+
+
+def clean_nonnegative(s: pd.Series) -> pd.Series:
+    x = to_num(s)
+    return x.mask(x < 0, np.nan)
+
+
+def clean_total_income(s: pd.Series) -> pd.Series:
+    x = to_num(s)
+    return x.mask(x < 0, 0)
+
+
+def assert_unique(df: pd.DataFrame, key: str, name: str) -> None:
+    dup = df[key].duplicated(keep=False)
+    if dup.any():
+        sample = df.loc[dup, key].drop_duplicates().astype("string").head(10).tolist()
+        raise ValueError(f"{name}: duplicate {key}. Sample: {sample}")
+
+
+def safe_left_merge(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    on: str,
+    validate: str,
+    left_name: str,
+    right_name: str
+) -> pd.DataFrame:
+    n0 = len(left)
+    out = left.merge(right, on=on, how="left", validate=validate)
+    if len(out) != n0:
+        raise ValueError(f"Row count changed in merge {left_name} <- {right_name}: {n0} -> {len(out)}")
+    return out
+
+
+# =============================================================================
+# DOMAIN HELPERS
+# =============================================================================
+
+def recode_region_name(region_code: pd.Series) -> pd.Series:
+    mapping = {
+        "ES11": "Galicia",
+        "ES12": "Principado de Asturias",
+        "ES13": "Cantabria",
+        "ES21": "País Vasco",
+        "ES22": "Comunidad Foral de Navarra",
+        "ES23": "La Rioja",
+        "ES24": "Aragón",
+        "ES30": "Comunidad de Madrid",
+        "ES41": "Castilla y León",
+        "ES42": "Castilla-La Mancha",
+        "ES43": "Extremadura",
+        "ES51": "Cataluña",
+        "ES52": "Comunidad Valenciana",
+        "ES53": "Illes Balears",
+        "ES61": "Andalucía",
+        "ES62": "Región de Murcia",
+        "ES63": "Ciudad Autónoma de Ceuta",
+        "ES64": "Ciudad Autónoma de Melilla",
+        "ES70": "Canarias",
+        "ESZZ": "Extra-Regio",
+    }
+    return region_code.map(mapping).astype("string")
+
+
+def get_age(df: pd.DataFrame, year: int) -> pd.Series:
+    if "RB082" in df.columns:
+        age = to_num(df["RB082"])
+    elif "RB081" in df.columns:
+        age = to_num(df["RB081"])
+    elif "RB080" in df.columns:
+        age = year - to_num(df["RB080"])
+    else:
+        age = empty_num(df)
+
+    return age.mask((age < 0) | (age > 110), np.nan)
+
+
+def get_labour_status(df: pd.DataFrame) -> pd.Series:
+    # Keep PL031 fallback only if it actually exists in some year/files
+    if "PL031" in df.columns:
+        v = to_num(df["PL031"])
+        out = np.select(
+            [
+                v.isin([1, 2, 3, 4]),
+                v.eq(5),
+                v.isin([6, 7, 8, 9, 10, 11]),
+            ],
+            [
+                "working",
+                "unemployed",
+                "inactive",
+            ],
+            default=pd.NA
+        )
+        return pd.Series(out, index=df.index, dtype="string")
+
+    if "PL032" in df.columns:
+        v = to_num(df["PL032"])
+        out = np.select(
+            [
+                v.eq(1),
+                v.eq(2),
+                v.isin([3, 4, 5, 6, 8]),
+                v.eq(7),
+            ],
+            [
+                "working",
+                "unemployed",
+                "inactive",
+                "missing",
+            ],
+            default=pd.NA
+        )
+        return pd.Series(out, index=df.index, dtype="string")
+
+    return empty_str(df)
+
+
+# =============================================================================
+# LOAD CLEAN FILES
+# =============================================================================
+
+def load_td_clean(path: Path) -> pd.DataFrame:
+    td = read_dta_file(path)
+
+    out = pd.DataFrame({
+        "HB030": get_series(td, SCHEMA["td"]["household_id"], as_id=True),
+        "region_code": get_series(td, SCHEMA["td"]["region_code"], as_id=True),
+        "weight_hh": get_series(td, SCHEMA["td"]["weight_hh"], numeric=True),
+    })
+    out["region_name"] = recode_region_name(out["region_code"])
+
+    assert_unique(out, "HB030", "td_clean")
+    return out
+
+
+def load_th_clean(path: Path) -> pd.DataFrame:
+    th = read_dta_file(path)
+
+    capital_col = first_existing(th, SCHEMA["th"]["capital_income"])
+    capital_series = clean_nonnegative(th[capital_col]) if capital_col else empty_num(th)
+
+    hhsize_col = first_existing(th, SCHEMA["th"]["household_size_raw"])
+    hhsize_series = clean_nonnegative(th[hhsize_col]) if hhsize_col else empty_num(th)
+
+    rental_col = first_existing(th, SCHEMA["th"]["rental_income_gross"])
+    rental_series = clean_nonnegative(th[rental_col]) if rental_col else empty_num(th)
+
+    mortgage_col = first_existing(th, SCHEMA["th"]["mortgage_interest_paid"])
+    mortgage_series = clean_nonnegative(th[mortgage_col]) if mortgage_col else empty_num(th)
+
+    wealth_tax_col = first_existing(th, SCHEMA["th"]["wealth_tax_paid"])
+    wealth_tax_series = clean_nonnegative(th[wealth_tax_col]) if wealth_tax_col else empty_num(th)
+
+    out = pd.DataFrame({
+        "HB030": get_series(th, SCHEMA["th"]["household_id"], as_id=True),
+        "household_size_raw": hhsize_series,
+        "HX060": get_series(th, SCHEMA["th"]["official_hh_type"], numeric=True),
+        "HY020": clean_total_income(get_series(th, SCHEMA["th"]["income_after_transfers"], numeric=True)),
+        "HY022": clean_total_income(get_series(th, SCHEMA["th"]["income_before_transfers"], numeric=True)),
+        "HY090": capital_series,
+        "HY040G": rental_series,
+        "HY100G": mortgage_series,
+        "HY120G": wealth_tax_series,
+        "HH021": get_series(th, SCHEMA["th"]["tenure_status"], numeric=True),
+        "HX240": clean_nonnegative(get_series(th, SCHEMA["th"]["consumption_units"], numeric=True)),
+        "vhPobreza": get_series(th, SCHEMA["th"]["poverty"], numeric=True),
+        "vhMATDEP": get_series(th, SCHEMA["th"]["matdep"], numeric=True),
+        "HB080": get_series(th, SCHEMA["th"]["responsible_person_1"], as_id=True),
+        "HB090": get_series(th, SCHEMA["th"]["responsible_person_2"], as_id=True),
+    })
+
+    assert_unique(out, "HB030", "th_clean")
+    return out
+
+
+def load_person_data(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame:
+    tr = read_dta_file(tr_path).copy()
+
+    tr["person_id"] = get_series(tr, SCHEMA["tr"]["person_id"], as_id=True)
+
+    # Dataset-specific rule for Spanish ECV:
+    # household ID is embedded in RB030
+    tr["HB030"] = tr["person_id"].str[:-2]
+
+    tr["age"] = get_age(tr, year)
+    tr["RB050"] = get_series(tr, SCHEMA["tr"]["weight_r"], numeric=True)
+
+    sex_code = get_series(tr, SCHEMA["tr"]["sex"], numeric=True)
+    tr["sex"] = pd.Series(
+        np.select(
+            [sex_code.eq(1), sex_code.eq(2)],
+            ["male", "female"],
+            default=pd.NA
+        ),
+        index=tr.index,
+        dtype="string"
+    )
+
+    tr["partner_id"] = get_series(tr, SCHEMA["tr"]["partner_id"], as_id=True)
+    tr["has_partner_id"] = (
+        tr["partner_id"].notna() &
+        tr["partner_id"].ne("") &
+        tr["partner_id"].ne("0")
+    )
+
+    tr = tr[[
+        "person_id", "HB030", "age", "sex", "has_partner_id", "RB050"
+    ]].copy()
+
+    if tp_path.exists():
+        tp = read_dta_file(tp_path).copy()
+        tp["person_id"] = get_series(tp, SCHEMA["tp"]["person_id"], as_id=True)
+        tp["PB040"] = get_series(tp, SCHEMA["tp"]["weight_p"], numeric=True)
+        tp["PB060"] = get_series(tp, SCHEMA["tp"]["weight_selected_resp"], numeric=True)
+        tp["person_weight_p"] = tp["PB060"].combine_first(tp["PB040"])
+        tp["labour_status"] = get_labour_status(tp)
+
+        tp = tp[[
+            "person_id", "PB040", "PB060", "person_weight_p", "labour_status"
+        ]].copy()
+
+        assert_unique(tp, "person_id", "tp_clean")
+
+        out = safe_left_merge(
+            tr, tp,
+            on="person_id",
+            validate="1:1",
+            left_name="tr",
+            right_name="tp"
+        )
+    else:
+        out = tr.copy()
+        out["PB040"] = np.nan
+        out["PB060"] = np.nan
+        out["person_weight_p"] = np.nan
+        out["labour_status"] = pd.Series(pd.NA, index=out.index, dtype="string")
+
+    out["working_age_18_64"] = out["age"].notna() & out["age"].ge(18) & out["age"].le(64)
+    out["labour_status_working_age"] = pd.Series(
+        np.where(out["working_age_18_64"], out["labour_status"], pd.NA),
+        index=out.index,
+        dtype="string"
+    )
+
+    out["weight_r_analysis"] = out["RB050"]
+    out["weight_p_analysis"] = out["person_weight_p"]
+    out["person_weight_preferred"] = out["weight_p_analysis"].combine_first(out["weight_r_analysis"])
+
+    out["person_file_available"] = 1.0
+    out["person_composition_observed"] = 1.0
+    out["labour_file_available"] = float(tp_path.exists())
+    out["labour_observed"] = float(tp_path.exists())
+    out["composition_source"] = "person_file"
+
+    assert_unique(out, "person_id", "person_data_final")
+    return out
+
+
+def build_titular_proxies(
+    th_clean: pd.DataFrame,
+    person_data: pd.DataFrame | None
+) -> pd.DataFrame:
+    if person_data is None or person_data.empty:
+        out = th_clean[["HB030", "HB080", "HB090"]].copy()
+
+        for col in [
+            "titular1_person_id", "titular1_age", "titular1_sex", "titular1_labour_status",
+            "titular2_person_id", "titular2_age", "titular2_sex", "titular2_labour_status"
+        ]:
+            out[col] = pd.NA
+
+        out["titular_proxy_data_available"] = 0.0
+        out["titular1_found_in_person_file"] = 0.0
+        out["titular2_found_in_person_file"] = 0.0
+        return out
+
+    person_lookup = person_data[[
+        "person_id", "HB030", "age", "sex", "labour_status"
+    ]].copy()
+
+    person_lookup = person_lookup.rename(columns={
+        "person_id": "lookup_person_id"
+    })
+
+    t1 = th_clean[["HB030", "HB080"]].copy()
+    t1 = t1.rename(columns={"HB080": "lookup_person_id"})
+    t1 = t1.merge(
+        person_lookup,
+        on="lookup_person_id",
+        how="left",
+        validate="m:1"
+    )
+    t1 = t1.rename(columns={
+        "lookup_person_id": "titular1_person_id",
+        "age": "titular1_age",
+        "sex": "titular1_sex",
+        "labour_status": "titular1_labour_status",
+        "HB030_x": "HB030",
+        "HB030_y": "titular1_household_match"
+    })
+
+    t2 = th_clean[["HB030", "HB090"]].copy()
+    t2 = t2.rename(columns={"HB090": "lookup_person_id"})
+    t2 = t2.merge(
+        person_lookup,
+        on="lookup_person_id",
+        how="left",
+        validate="m:1"
+    )
+    t2 = t2.rename(columns={
+        "lookup_person_id": "titular2_person_id",
+        "age": "titular2_age",
+        "sex": "titular2_sex",
+        "labour_status": "titular2_labour_status",
+        "HB030_x": "HB030",
+        "HB030_y": "titular2_household_match"
+    })
+
+    out = th_clean[["HB030", "HB080", "HB090"]].copy()
+    out = out.merge(
+        t1[[
+            "HB030", "titular1_person_id", "titular1_age", "titular1_sex",
+            "titular1_labour_status"
+        ]],
+        on="HB030",
+        how="left",
+        validate="1:1"
+    )
+    out = out.merge(
+        t2[[
+            "HB030", "titular2_person_id", "titular2_age", "titular2_sex",
+            "titular2_labour_status"
+        ]],
+        on="HB030",
+        how="left",
+        validate="1:1"
+    )
+
+    out["titular1_found_in_person_file"] = np.where(
+        out["titular1_person_id"].notna() & out["titular1_age"].notna(),
+        1.0, 0.0
+    )
+    out["titular2_found_in_person_file"] = np.where(
+        out["titular2_person_id"].notna() & out["titular2_age"].notna(),
+        1.0, 0.0
+    )
+    out["titular_proxy_data_available"] = np.where(
+        (out["titular1_found_in_person_file"] == 1) |
+        (out["titular2_found_in_person_file"] == 1),
+        1.0, 0.0
+    )
+
+    assert_unique(out, "HB030", "titular_proxies")
+    return out
+
+
+def summarise_household(group: pd.DataFrame) -> pd.Series:
+    age = group["age"]
+    lsw = group["labour_status_working_age"]
+    working_age = group["working_age_18_64"]
+
+    n_adults = int((age >= 18).sum(skipna=True))
+    n_children = int((age < 18).sum(skipna=True))
+    n_working = int((lsw == "working").sum())
+    n_unemployed = int((lsw == "unemployed").sum())
+    n_inactive = int((lsw == "inactive").sum())
+    n_missing = int(((lsw == "missing") | lsw.isna()).sum())
+    n_working_age = int(working_age.sum())
+
+    return pd.Series({
+        "n_persons": len(group),
+        "n_adults": n_adults,
+        "n_children": n_children,
+        "n_adults_23plus": int((age >= 23).sum(skipna=True)),
+        "n_adults_25plus": int((age >= 25).sum(skipna=True)),
+        "one_adult_with_children": float((n_adults == 1) and (n_children > 0)),
+        "couple_present": float(group["has_partner_id"].sum(skipna=True) >= 2),
+        "n_working_18_64": n_working,
+        "n_unemployed_18_64": n_unemployed,
+        "n_inactive_18_64": n_inactive,
+        "n_missing_18_64": n_missing,
+        "any_working_18_64": float(n_working > 0),
+        "any_unemployed_18_64": float(n_unemployed > 0),
+        "no_working_age_worker": float((n_working_age > 0) and (n_working == 0)),
+        "all_working_age_inactive": float((n_working_age > 0) and (n_working == 0) and (n_unemployed == 0) and (n_inactive > 0)),
+        "all_working_age_missing": float((n_working_age > 0) and ((n_working + n_unemployed + n_inactive) == 0)),
+        "person_file_available": float(group["person_file_available"].iloc[0]),
+        "person_composition_observed": float(group["person_composition_observed"].iloc[0]),
+        "labour_file_available": float(group["labour_file_available"].iloc[0]),
+        "labour_observed": float(group["labour_observed"].iloc[0]),
+        "composition_source": group["composition_source"].iloc[0],
+    })
+
+
+def build_household_composition(
+    tr_path: Path,
+    tp_path: Path,
+    th_clean: pd.DataFrame,
+    year: int
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    tr_available = tr_path.exists()
+    tp_available = tp_path.exists()
+
+    if not tr_available:
+        logger.warning("Missing Tr file for year %s. Household composition will use fallback logic.", year)
+        if STRICT_PERSON_DATA:
+            raise FileNotFoundError(f"Strict mode enabled: missing Tr file for year {year}")
+
+        out = pd.DataFrame({"HB030": th_clean["HB030"].drop_duplicates()})
+        for col in [
+            "n_persons", "n_adults", "n_children", "n_adults_23plus", "n_adults_25plus",
+            "one_adult_with_children", "couple_present", "n_working_18_64", "n_unemployed_18_64",
+            "n_inactive_18_64", "n_missing_18_64", "any_working_18_64", "any_unemployed_18_64",
+            "no_working_age_worker", "all_working_age_inactive", "all_working_age_missing"
+        ]:
+            out[col] = np.nan
+
+        out["person_file_available"] = 0.0
+        out["person_composition_observed"] = 0.0
+        out["labour_file_available"] = float(tp_available)
+        out["labour_observed"] = 0.0
+        out["composition_source"] = "fallback_no_tr"
+
+        assert_unique(out, "HB030", "household_composition_fallback")
+        return out, None
+
+    if not tp_available:
+        logger.warning("Missing Tp file for year %s. Labour variables will be unavailable.", year)
+
+    person_data = load_person_data(tr_path, tp_path, year)
+
+    out = (
+        person_data
+        .groupby("HB030", dropna=False)
+        .apply(summarise_household)
+        .reset_index()
+    )
+
+    assert_unique(out, "HB030", "household_composition")
+    return out, person_data
+
+
+# =============================================================================
+# DERIVED VARIABLES
+# =============================================================================
+
+def derive_variables(df: pd.DataFrame, year: int) -> pd.DataFrame:
+    out = df.copy()
+    out["year"] = year
+
+    out["person_file_available"] = out["person_file_available"].fillna(0.0)
+    out["person_composition_observed"] = out["person_composition_observed"].fillna(0.0)
+    out["labour_file_available"] = out["labour_file_available"].fillna(0.0)
+    out["labour_observed"] = out["labour_observed"].fillna(0.0)
+    out["composition_source"] = out["composition_source"].astype("string").fillna("unknown")
+
+    out["composition_data_missing"] = np.where(out["person_composition_observed"].eq(0), 1.0, 0.0)
+    out["labour_data_missing"] = np.where(out["labour_observed"].eq(0), 1.0, 0.0)
+
+    out["household_size"] = out["n_persons"].combine_first(out["household_size_raw"])
+
+    out["household_size_source"] = pd.Series(
+        np.select(
+            [
+                out["n_persons"].notna(),
+                out["n_persons"].isna() & out["household_size_raw"].notna(),
+            ],
+            [
+                "person_file",
+                "household_file",
+            ],
+            default="missing"
+        ),
+        index=out.index,
+        dtype="string"
+    )
+
+    out["children_present"] = np.select(
+        [out["n_children"].gt(0), out["n_children"].eq(0)],
+        [1.0, 0.0],
+        default=np.nan
+    )
+
+    out["single_parent_official"] = np.select(
+        [out["HX060"].eq(10), out["HX060"].notna()],
+        [1.0, 0.0],
+        default=np.nan
+    )
+
+    out["hh_group_hx060"] = pd.Series(
+        np.select(
+            [
+                out["HX060"].isin([1, 2, 3, 4, 5, 6]),
+                out["HX060"].isin([7, 8]),
+                out["HX060"].eq(9),
+                out["HX060"].eq(10),
+                out["HX060"].isin([11, 12, 13]),
+                out["HX060"].eq(14),
+            ],
+            [
+                "single_person",
+                "two_adults_no_children",
+                "other_no_children",
+                "single_parent",
+                "two_adults_with_children",
+                "other_with_children",
+            ],
+            default=pd.NA
+        ),
+        index=out.index,
+        dtype="string"
+    )
+
+    out["hh_group_sim"] = pd.Series(
+        np.select(
+            [
+                (out["n_adults"] == 1) & (out["n_children"] == 0),
+                (out["n_adults"] == 1) & (out["n_children"] > 0),
+                (out["n_adults"] == 2) & (out["n_children"] == 0),
+                (out["n_adults"] == 2) & (out["n_children"] > 0),
+                (out["n_adults"] >= 3) & (out["n_children"] == 0),
+                (out["n_adults"] >= 3) & (out["n_children"] > 0),
+            ],
+            [
+                "single_adult",
+                "one_adult_with_children",
+                "two_adults_no_children",
+                "two_adults_with_children",
+                "threeplus_adults_no_children",
+                "threeplus_adults_with_children",
+            ],
+            default=pd.NA
+        ),
+        index=out.index,
+        dtype="string"
+    )
+
+    out["income_before_transfers"] = out["HY022"]
+    out["income_before_transfers_monthly"] = out["HY022"] / 12
+
+    out["income_after_transfers"] = out["HY020"]
+    out["income_after_transfers_monthly"] = out["HY020"] / 12
+
+    out["capital_income"] = out["HY090"]
+    out["capital_income_monthly"] = out["HY090"] / 12
+    out["positive_capital_income"] = np.where(
+        out["HY090"].notna() & out["HY090"].gt(0), 1.0, 0.0
+    )
+
+    out["rental_income_gross"] = out["HY040G"]
+    out["rental_income_monthly"] = out["HY040G"] / 12
+    out["positive_rental_income"] = np.where(
+        out["HY040G"].notna() & out["HY040G"].gt(0), 1.0, 0.0
+    )
+
+    out["mortgage_interest_paid"] = out["HY100G"]
+    out["positive_mortgage_interest"] = np.where(
+        out["HY100G"].notna() & out["HY100G"].gt(0), 1.0, 0.0
+    )
+
+    out["wealth_tax_paid_or_property_tax"] = out["HY120G"]
+    out["positive_hy120g"] = np.where(
+        out["HY120G"].notna() & out["HY120G"].gt(0), 1.0, 0.0
+    )
+
+    out["wealth_definition_period"] = pd.Series(
+        np.where(out["year"] <= 2020, "pre_2020_definition", "post_2020_definition"),
+        index=out.index,
+        dtype="string"
+    )
+
+    out["any_property_income"] = np.where(
+        out["HY040G"].notna() & out["HY040G"].gt(0), 1.0, 0.0
+    )
+
+    out["any_asset_income"] = np.where(
+        (out["HY040G"].notna() & out["HY040G"].gt(0)) |
+        (out["HY090"].notna() & out["HY090"].gt(0)),
+        1.0,
+        0.0
+    )
+
+    out["high_wealth_signal_pre2020"] = np.where(
+        (out["year"] <= 2020) &
+        (out["HY120G"].notna()) &
+        (out["HY120G"].gt(0)),
+        1.0,
+        0.0
+    )
+
+    out["wealth_proxy_strict"] = np.where(
+        out["year"] <= 2020,
+        np.where(
+            (out["HY040G"].notna() & out["HY040G"].gt(0)) |
+            (out["HY120G"].notna() & out["HY120G"].gt(0)),
+            1.0,
+            0.0
+        ),
+        np.where(
+            out["HY040G"].notna() & out["HY040G"].gt(0),
+            1.0,
+            0.0
+        )
+    )
+
+    out["wealth_proxy_broad"] = np.where(
+        out["year"] <= 2020,
+        np.where(
+            (out["HY040G"].notna() & out["HY040G"].gt(0)) |
+            (out["HY090"].notna() & out["HY090"].gt(0)) |
+            (out["HY120G"].notna() & out["HY120G"].gt(0)),
+            1.0,
+            0.0
+        ),
+        np.where(
+            (out["HY040G"].notna() & out["HY040G"].gt(0)) |
+            (out["HY090"].notna() & out["HY090"].gt(0)),
+            1.0,
+            0.0
+        )
+    )
+
+    out["resources_total"] = out["income_before_transfers"]
+    out["resources_excl_capital"] = np.where(
+        out["income_before_transfers"].notna() & out["capital_income"].notna(),
+        np.maximum(out["income_before_transfers"] - out["capital_income"], 0),
+        np.where(out["income_before_transfers"].notna(), out["income_before_transfers"], np.nan)
+    )
+
+    out["tenure_status"] = out["HH021"]
+    out["homeowner"] = np.select(
+        [out["HH021"].isin([1, 2]), out["HH021"].isin([3, 4, 5])],
+        [1.0, 0.0],
+        default=np.nan
+    )
+    out["owner_outright"] = np.select(
+        [out["HH021"].eq(1), out["HH021"].isin([2, 3, 4, 5])],
+        [1.0, 0.0],
+        default=np.nan
+    )
+    out["owner_with_mortgage"] = np.select(
+        [out["HH021"].eq(2), out["HH021"].isin([1, 3, 4, 5])],
+        [1.0, 0.0],
+        default=np.nan
+    )
+
+    out["matdep"] = np.select(
+        [out["vhMATDEP"].eq(1), out["vhMATDEP"].eq(0)],
+        [1.0, 0.0],
+        default=np.nan
+    )
+    out["poverty"] = np.select(
+        [out["vhPobreza"].eq(1), out["vhPobreza"].eq(0)],
+        [1.0, 0.0],
+        default=np.nan
+    )
+
+    out["consumption_units"] = out["HX240"]
+
+    out["any_working"] = out["any_working_18_64"]
+    out["any_unemployed"] = out["any_unemployed_18_64"]
+    out["n_working"] = out["n_working_18_64"]
+    out["n_unemployed"] = out["n_unemployed_18_64"]
+    out["n_inactive_working_age"] = out["n_inactive_18_64"]
+    out["n_missing_working_age"] = out["n_missing_18_64"]
+
+    out["post"] = np.select(
+        [out["year"] >= 2021, out["year"] <= 2019],
+        [1.0, 0.0],
+        default=np.nan
+    )
+    out["period"] = pd.Series(
+        np.select(
+            [out["year"] <= 2019, out["year"] == 2020, out["year"] >= 2021],
+            ["pre_2020", "covid_2020", "post_2020"],
+            default=pd.NA
+        ),
+        index=out.index,
+        dtype="string"
+    )
+
+    out["titular1_age"] = pd.to_numeric(out["titular1_age"], errors="coerce")
+    out["titular2_age"] = pd.to_numeric(out["titular2_age"], errors="coerce")
+
+    out["titular1_18plus"] = np.where(out["titular1_age"].ge(18), 1.0, 0.0)
+    out["titular1_23plus"] = np.where(out["titular1_age"].ge(23), 1.0, 0.0)
+    out["titular1_25plus"] = np.where(out["titular1_age"].ge(25), 1.0, 0.0)
+
+    out["titular2_18plus"] = np.where(out["titular2_age"].ge(18), 1.0, 0.0)
+    out["titular2_23plus"] = np.where(out["titular2_age"].ge(23), 1.0, 0.0)
+    out["titular2_25plus"] = np.where(out["titular2_age"].ge(25), 1.0, 0.0)
+
+    lab1 = out["titular1_labour_status"]
+    lab2 = out["titular2_labour_status"]
+
+    out["titular1_is_unemployed"] = np.nan
+    out.loc[lab1.notna(), "titular1_is_unemployed"] = 0.0
+    out.loc[lab1.eq("unemployed").fillna(False), "titular1_is_unemployed"] = 1.0
+
+    out["titular1_is_working"] = np.nan
+    out.loc[lab1.notna(), "titular1_is_working"] = 0.0
+    out.loc[lab1.eq("working").fillna(False), "titular1_is_working"] = 1.0
+
+    out["titular1_is_inactive"] = np.nan
+    out.loc[lab1.notna(), "titular1_is_inactive"] = 0.0
+    out.loc[lab1.eq("inactive").fillna(False), "titular1_is_inactive"] = 1.0
+
+    out["titular2_is_unemployed"] = np.nan
+    out.loc[lab2.notna(), "titular2_is_unemployed"] = 0.0
+    out.loc[lab2.eq("unemployed").fillna(False), "titular2_is_unemployed"] = 1.0
+
+    out["titular2_is_working"] = np.nan
+    out.loc[lab2.notna(), "titular2_is_working"] = 0.0
+    out.loc[lab2.eq("working").fillna(False), "titular2_is_working"] = 1.0
+
+    out["titular2_is_inactive"] = np.nan
+    out.loc[lab2.notna(), "titular2_is_inactive"] = 0.0
+    out.loc[lab2.eq("inactive").fillna(False), "titular2_is_inactive"] = 1.0
+
+    out["titular_proxy_count"] = (
+        out["titular1_found_in_person_file"].fillna(0) +
+        out["titular2_found_in_person_file"].fillna(0)
+    )
+
+    out["titular_proxy_missing"] = np.where(
+        out["titular_proxy_data_available"].fillna(0).eq(0),
+        1.0, 0.0
+    )
+
+    out["usable_for_rmi_simulation"] = np.where(
+        out["region_code"].notna() &
+        out["weight_hh"].notna() &
+        out["resources_total"].notna() &
+        out["person_composition_observed"].eq(1) &
+        out["labour_observed"].eq(1) &
+        out["titular_proxy_data_available"].eq(1),
+        1.0,
+        0.0
+    )
+
+    assert_unique(out, "HB030", f"final_{year}")
+    return out
+
+
+def process_year(year: int, force_rebuild: bool = False) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    hh_cache_path = get_household_cache_path(year)
+    person_cache_path = get_person_cache_path(year)
+
+    if hh_cache_path.exists() and person_cache_path.exists() and not force_rebuild:
+        logger.info("Loading cached household/person files for %s", year)
+        hh = pd.read_parquet(hh_cache_path)
+        person = pd.read_parquet(person_cache_path)
+        return hh, person
+
+    logger.info("Processing year %s from raw files", year)
+    paths = make_paths(year)
+
+    if not paths["td"].exists() or not paths["th"].exists():
+        logger.warning("Missing Td or Th for year %s", year)
+        return None, None
+
+    td_clean = load_td_clean(paths["td"])
+    th_clean = load_th_clean(paths["th"])
+    hh_comp, person_data = build_household_composition(paths["tr"], paths["tp"], th_clean, year)
+    titular_proxies = build_titular_proxies(th_clean, person_data)
+
+    merged_hh = safe_left_merge(
+        th_clean, hh_comp,
+        on="HB030", validate="1:1",
+        left_name="th_clean", right_name="hh_comp"
+    )
+    merged_hh = safe_left_merge(
+        merged_hh, titular_proxies,
+        on="HB030", validate="1:1",
+        left_name="merged_hh", right_name="titular_proxies"
+    )
+    merged_hh = safe_left_merge(
+        merged_hh, td_clean,
+        on="HB030", validate="1:1",
+        left_name="merged_hh", right_name="td_clean"
+    )
+
+    logger.info(
+        "Year %s | share missing weight_hh = %.4f",
+        year,
+        float(merged_hh["weight_hh"].isna().mean())
+    )
+
+    hh_final = derive_variables(merged_hh, year)
+    hh_final.to_parquet(hh_cache_path, index=False)
+
+    person_final = None
+    if person_data is not None and not person_data.empty:
+        hh_context = hh_final[[
+            "HB030", "year", "region_code", "region_name",
+            "weight_hh",
+            "HX060", "HH021",
+            "income_before_transfers", "income_after_transfers",
+            "resources_total", "resources_excl_capital",
+            "homeowner", "owner_outright", "owner_with_mortgage",
+            "poverty", "matdep", "household_size",
+            "n_adults", "n_children",
+            "wealth_proxy_strict", "wealth_proxy_broad"
+        ]].copy()
+
+        person_final = safe_left_merge(
+            person_data, hh_context,
+            on="HB030", validate="m:1",
+            left_name="person_data", right_name="hh_context"
+        )
+        person_final["year"] = year
+
+        person_final.to_parquet(person_cache_path, index=False)
+
+    logger.info("Saved household/person caches for %s", year)
+    return hh_final, person_final
+
+
+# =============================================================================
+# CHECKS
+# =============================================================================
+
+def weighted_mean(x: pd.Series, w: pd.Series) -> float:
+    m = x.notna() & w.notna()
+    if not m.any():
+        return np.nan
+    return float(np.average(x[m], weights=w[m]))
+
+
+def weighted_share(x: pd.Series, w: pd.Series, value=1) -> float:
+    m = x.notna() & w.notna()
+    if not m.any():
+        return np.nan
+    return float(np.average((x[m] == value).astype(float), weights=w[m]))
+
+
+def make_household_checks(
+    df: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    merge_check = (
+        df.groupby("year")
+        .agg(
+            n_households=("HB030", "size"),
+            n_weights=("weight_hh", lambda x: x.notna().sum()),
+            n_regions=("region_code", lambda x: x.notna().sum()),
+            n_income_resources=("resources_total", lambda x: x.notna().sum()),
+            n_labour=("any_working", lambda x: x.notna().sum()),
+        )
+        .reset_index()
+    )
+
+    hh_check = (
+        df.groupby("year")
+        .apply(lambda g: pd.Series({
+            "mean_hhsize_w": weighted_mean(g["household_size"], g["weight_hh"]),
+            "pct_homeowner_w": 100 * weighted_share(g["homeowner"], g["weight_hh"], 1.0),
+            "pct_poverty_w": 100 * weighted_share(g["poverty"], g["weight_hh"], 1.0),
+        }))
+        .reset_index()
+    )
+
+    composition_check = (
+        df.groupby("year")
+        .agg(
+            n_households=("HB030", "size"),
+            n_missing_person_data=("composition_data_missing", lambda x: x.eq(1).sum()),
+            pct_missing_person_data=("composition_data_missing", lambda x: x.eq(1).mean() * 100),
+            n_missing_labour_data=("labour_data_missing", lambda x: x.eq(1).sum()),
+            pct_missing_labour_data=("labour_data_missing", lambda x: x.eq(1).mean() * 100),
+            n_household_size_from_household_file=("household_size_source", lambda x: x.eq("household_file").sum()),
+            pct_household_size_from_household_file=("household_size_source", lambda x: x.eq("household_file").mean() * 100),
+            n_usable_for_rmi=("usable_for_rmi_simulation", lambda x: x.eq(1).sum()),
+            pct_usable_for_rmi=("usable_for_rmi_simulation", lambda x: x.eq(1).mean() * 100),
+        )
+        .reset_index()
+    )
+
+    wealth_check = (
+        df.groupby("year")
+        .apply(lambda g: pd.Series({
+            "pct_hy040g_pos_w": 100 * weighted_mean(g["HY040G"].gt(0).astype(float), g["weight_hh"]),
+            "pct_hy090_pos_w": 100 * weighted_mean(g["HY090"].gt(0).astype(float), g["weight_hh"]),
+            "pct_hy120g_pos_w": 100 * weighted_mean(g["HY120G"].gt(0).astype(float), g["weight_hh"]),
+            "pct_wealth_proxy_strict_w": 100 * weighted_share(g["wealth_proxy_strict"], g["weight_hh"], 1.0),
+            "pct_wealth_proxy_broad_w": 100 * weighted_share(g["wealth_proxy_broad"], g["weight_hh"], 1.0),
+        }))
+        .reset_index()
+    )
+
+    return merge_check, hh_check, composition_check, wealth_check
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+def main() -> None:
+    all_households = []
+    all_persons = []
+
+    for year in YEARS:
+        hh, person = process_year(year, force_rebuild=FORCE_REBUILD)
+        if hh is not None:
+            all_households.append(hh)
+        if person is not None:
+            all_persons.append(person)
+
+    if not all_households:
+        raise RuntimeError("No household datasets were created or loaded.")
+
+    ecv_household = pd.concat(all_households, ignore_index=True)
+
+# Define analysis sample
+    df_analysis = ecv_household.loc[
+    ecv_household["usable_for_rmi_simulation"] == 1
+    ].copy()
+
+    print("\nWeighted households in analysis sample:")
+    print(df_analysis.groupby("year")["weight_hh"].sum())
+    ecv_person = pd.concat(all_persons, ignore_index=True) if all_persons else None
+
+    merge_check, hh_check, composition_check, wealth_check = make_household_checks(ecv_household)
+
+    print("\nmerge_check")
+    print(merge_check.to_string(index=False))
+
+    print("\nhh_check")
+    print(hh_check.to_string(index=False))
+
+    print("\ncomposition_check")
+    print(composition_check.to_string(index=False))
+
+    print("\nwealth_check")
+    print(wealth_check.to_string(index=False))
+
+    wealth_levels_check = (
+        ecv_household.groupby("year")
+        .agg(
+            mean_hy040g=("HY040G", "mean"),
+            mean_hy090=("HY090", "mean"),
+            mean_hy120g=("HY120G", "mean"),
+            max_hy040g=("HY040G", "max"),
+            max_hy090=("HY090", "max"),
+            max_hy120g=("HY120G", "max"),
+        )
+        .reset_index()
+    )
+
+    print("\nwealth_levels_check (unweighted diagnostics)")
+    print(wealth_levels_check.to_string(index=False))
+
+    homeowner_vs_hy120g = (
+        ecv_household.groupby("year")
+        .apply(lambda g: pd.Series({
+            "pct_homeowner_w": 100 * weighted_share(g["homeowner"], g["weight_hh"], 1.0),
+            "pct_hy120g_pos_w": 100 * weighted_mean(g["HY120G"].gt(0).astype(float), g["weight_hh"]),
+        }))
+        .reset_index()
+    )
+
+    print("\nhomeowner_vs_hy120g")
+    print(homeowner_vs_hy120g.to_string(index=False))
+
+    print("\nfirst rows of household weights")
+    print(ecv_household[["HB030", "year", "weight_hh"]].head().to_string(index=False))
+
+    print("\nweight summary by year")
+    print(ecv_household.groupby("year")["weight_hh"].agg(["count", "mean", "sum", "min", "max"]))
+
+    print("\nunique households by year")
+    print(ecv_household.groupby("year")["HB030"].nunique())
+
+    dup_check = (
+        ecv_household.groupby(["year", "HB030"])
+        .size()
+        .reset_index(name="n")
+    )
+
+    print("\nduplicate count distribution")
+    print(dup_check["n"].value_counts().sort_index())
+
+    print("\nexample duplicated household-year rows")
+    print(dup_check.loc[dup_check["n"] > 1].head(20).to_string(index=False))
+
+    ecv_household.to_parquet(HOUSEHOLD_OUTPUT_PATH, index=False)
+    merge_check.to_csv(BASE_PATH / "merge_check.csv", index=False)
+    hh_check.to_csv(BASE_PATH / "hh_check.csv", index=False)
+    composition_check.to_csv(BASE_PATH / "composition_check.csv", index=False)
+    wealth_check.to_csv(BASE_PATH / "wealth_check.csv", index=False)
+    wealth_levels_check.to_csv(BASE_PATH / "wealth_levels_check.csv", index=False)
+    homeowner_vs_hy120g.to_csv(BASE_PATH / "homeowner_vs_hy120g.csv", index=False)
+
+    if ecv_person is not None:
+        ecv_person.to_parquet(PERSON_OUTPUT_PATH, index=False)
+
+        person_r_check = (
+            ecv_person.groupby("year")
+            .apply(lambda g: pd.Series({
+                "mean_age_w_r": weighted_mean(g["age"], g["weight_r_analysis"]),
+                "pct_female_w_r": 100 * weighted_share(g["sex"], g["weight_r_analysis"], "female"),
+            }))
+            .reset_index()
+        )
+
+        person_p_check = (
+            ecv_person.groupby("year")
+            .apply(lambda g: pd.Series({
+                "pct_working_w_p": 100 * weighted_share(g["labour_status"], g["weight_p_analysis"], "working"),
+                "pct_unemployed_w_p": 100 * weighted_share(g["labour_status"], g["weight_p_analysis"], "unemployed"),
+            }))
+            .reset_index()
+        )
+
+        print("\nperson_r_check")
+        print(person_r_check.to_string(index=False))
+
+        print("\nperson_p_check")
+        print(person_p_check.to_string(index=False))
+
+        print(
+         ecv_household.groupby("year")["weight_hh"]
+         .apply(lambda x: (x == 0).sum())
+        )
+
+        print(
+          ecv_household.groupby("year")["weight_hh"]
+          .apply(lambda x: (x == 0).mean() * 100)
+        )
+
+        print(
+          ecv_household.loc[ecv_household["weight_hh"] == 0,
+                      ["year", "HB030", "resources_total", "person_composition_observed",
+                       "labour_observed", "usable_for_rmi_simulation"]]
+          .head(20)
+            )
+        
+        print(
+        ecv_household.groupby("year")
+        .apply(lambda g: weighted_mean(g["household_size"], g["weight_hh"]))
+    )
+
+        print(
+    ecv_household.groupby("year")
+    .apply(lambda g: weighted_share(g["poverty"], g["weight_hh"], 1))
+        )
+        person_r_check.to_csv(BASE_PATH / "person_r_check.csv", index=False)
+        person_p_check.to_csv(BASE_PATH / "person_p_check.csv", index=False)
+
+    
+
+    logger.info("Saved combined household dataset to %s", HOUSEHOLD_OUTPUT_PATH)
+    if ecv_person is not None:
+        logger.info("Saved combined person dataset to %s", PERSON_OUTPUT_PATH)
+
+
+if __name__ == "__main__":
+    main()
