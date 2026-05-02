@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-BASE_PATH = Path(r"C:/Users/diana/Documents/Master-Policy Economics/Thesis")
+BASE_PATH = Path(r".").resolve()
 
 INPUT_HH = BASE_PATH / "ecv_household_clean.parquet"
 INPUT_RULES = BASE_PATH / "policy_db" / "rmi_baseline_rules.parquet"

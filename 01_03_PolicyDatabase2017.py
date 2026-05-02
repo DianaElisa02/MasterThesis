@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-BASE_PATH = Path(r"C:/Users/diana/Documents/Master-Policy Economics/Thesis")
+BASE_PATH = Path(r".").resolve()
 
 POLICY_DIR = BASE_PATH / "policy_db"
 POLICY_DIR.mkdir(parents=True, exist_ok=True)

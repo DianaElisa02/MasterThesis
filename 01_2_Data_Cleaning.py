@@ -1054,9 +1054,6 @@ def process_year(
     hh_comp = build_household_composition(person, th["household_id"])
     rp = build_responsible_person_proxies(th, person)
 
-    print("\nRP columns:")
-    print(rp.columns.tolist())
-
     hh = safe_left_merge(
         th,
         hh_comp,
