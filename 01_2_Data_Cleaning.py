@@ -29,62 +29,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-SCHEMA = {
-    "td": {
-        "household_id": ["DB030"],
-        "region_code": ["DB040"],
-        "weight_hh": ["DB090"],
-    },
-    "th": {
-        "household_id": ["HB030"],
-        "household_size_raw": ["HB120"],
-        "official_hh_type": ["HX060"],
-        "income_after_transfers": ["HY020"],
-        "income_before_transfers": ["HY022"],
-        "capital_income": ["HY090", "HY090N", "HY090G"],
-        "rental_income_gross": ["HY040G"],
-        "mortgage_interest_paid": ["HY100G"],
-        "wealth_tax_paid": ["HY120G"],
-        "tenure_status": ["HH021"],
-        "consumption_units": ["HX240"],
-        "poverty": ["vhPobreza"],
-        "matdep": ["vhMATDEP"],
-        "responsible_person_1": ["HB080"],
-        "responsible_person_2": ["HB090"],
-    },
-    "tr": {
-        "person_id": ["RB030"],
-        "household_id": ["DB030", "HB030"],
-        "sex": ["RB090"],
-        "partner_id": ["RB240"],
-        "weight_r": ["RB050"],
-        "age_current": ["RB082"],
-        "age_income_ref": ["RB081"],
-        "birth_year": ["RB080"],
-    },
-    "tp": {
-        "person_id": ["PB030", "RB030"],
-        "weight_p": ["PB040"],
-        "weight_selected_resp": ["PB060"],
-        "labour_status_detail": ["PL031", "PL032"],
-        "active_job_search": ["PL020"],
-        "currently_in_education": ["PE010"],
-        "nationality": ["PB220A"],
-        "social_assistance_income_annual": ["HY060N"],
-        "employee_cash_income_net": ["PY010N"],
-        "employee_noncash_income_net": ["PY020N"],
-        "selfemployment_income_net": ["PY050N"],
-    },
+SCHEMA = load_ecv_schema("ecv_schema.yml")
+
+
+ECV_FILE_PREFIXES = {
+    "td": "ECV_Td",
+    "th": "ECV_Th",
+    "tr": "ECV_Tr",
+    "tp": "ECV_Tp",
 }
 
 
+def ecv_file_path(file_type: str, year: int) -> Path:
+    """
+    Return path to one ECV .dta file.
+
+    Example:
+    ecv_file_path("th", 2021)
+    -> input_data/ECV_Th_2021.dta
+    """
+    try:
+        prefix = ECV_FILE_PREFIXES[file_type.lower()]
+    except KeyError:
+        valid = ", ".join(ECV_FILE_PREFIXES)
+        raise ValueError(f"Unknown file_type={file_type!r}. Use one of: {valid}")
+
+    return INPUT_DIR / f"{prefix}_{year}.dta"
+
+
 def make_paths(year: int) -> dict[str, Path]:
-    root = BASE_PATH / f"{DATA_PREFIX}{year}"
     return {
-        "td": root / f"ECV_Td_{year}" / "STATA" / f"ECV_Td_{year}.dta",
-        "th": root / f"ECV_Th_{year}" / "STATA" / f"ECV_Th_{year}.dta",
-        "tr": root / f"ECV_Tr_{year}" / "STATA" / f"ECV_Tr_{year}.dta",
-        "tp": root / f"ECV_Tp_{year}" / "STATA" / f"ECV_Tp_{year}.dta",
+        file_type: ecv_file_path(file_type, year) for file_type in ECV_FILE_PREFIXES
     }
 
 
