@@ -8,6 +8,14 @@ import numpy as np
 import pandas as pd
 
 from schema_loader import load_ecv_schema
+from schemas import (
+    HouseholdCompositionSchema,
+    HouseholdFinalSchema,
+    PersonSchema,
+    TdSchema,
+    ThSchema,
+    TpSchema,
+)
 
 BASE_PATH = Path(r".").resolve()
 INPUT_DIR = BASE_PATH / "input_data"
@@ -130,12 +138,6 @@ def clean_nonnegative(s: pd.Series) -> pd.Series:
     x = to_num(s)
     return x.mask(x < 0, np.nan)
 
-
-def ensure_unique(df: pd.DataFrame, key: str, name: str) -> None:
-    dup = df[key].duplicated(keep=False)
-    if dup.any():
-        sample = df.loc[dup, key].drop_duplicates().head(10).tolist()
-        raise ValueError(f"{name}: duplicate {key}; sample={sample}")
 
 
 def safe_left_merge(
@@ -302,8 +304,7 @@ def load_td_clean(path: Path) -> pd.DataFrame:
     )
     out["region_name"] = recode_region_name(out["region_code"])
 
-    ensure_unique(out, "household_id", "td")
-    return out
+    return TdSchema.validate(out)
 
 
 def load_th_clean(path: Path) -> pd.DataFrame:
@@ -354,8 +355,7 @@ def load_th_clean(path: Path) -> pd.DataFrame:
         }
     )
 
-    ensure_unique(out, "household_id", "th")
-    return out
+    return ThSchema.validate(out)
 
 
 def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame | None:
@@ -476,7 +476,7 @@ def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame |
                 "labour_income_person_monthly",
             ]
         ].copy()
-        ensure_unique(tp, "person_id", "tp")
+        TpSchema.validate(tp)
 
         person = safe_left_merge(
             person, tp, on="person_id", validate="1:1", left_name="tr", right_name="tp"
@@ -513,8 +513,7 @@ def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame |
     person["person_file_available"] = 1.0
     person["year"] = year
 
-    ensure_unique(person, "person_id", f"person_{year}")
-    return person
+    return PersonSchema.validate(person)
 
 
 # =============================================================================
@@ -744,8 +743,7 @@ def build_household_composition(
         .apply(summarise_household)
         .reset_index()
     )
-    ensure_unique(out, "household_id", "household_composition")
-    return out
+    return HouseholdCompositionSchema.validate(out)
 
 
 def build_responsible_person_proxies(
@@ -1022,8 +1020,7 @@ def derive_household_variables(df: pd.DataFrame, year: int) -> pd.DataFrame:
         ),
     )
 
-    ensure_unique(out, "household_id", f"household_final_{year}")
-    return out
+    return HouseholdFinalSchema.validate(out)
 
 
 def process_year(

@@ -7,6 +7,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from schemas import (
+    BaselineAmountSummarySchema,
+    BaselineRules2017Schema,
+    BaselineRulesSchema,
+    BaselineScheduleSchema,
+    RegionLookupSchema,
+    RmiAmountsSchema,
+    RmiCoverageSchema,
+    RmiEligibilitySchema,
+)
+
 BASE_PATH = Path(r".").resolve()
 
 POLICY_DIR = BASE_PATH / "policy_db"
@@ -43,26 +54,6 @@ def save_parquet_csv(df: pd.DataFrame, stem: str) -> None:
     df.to_parquet(POLICY_DIR / f"{stem}.parquet", index=False)
     df.to_csv(POLICY_DIR / f"{stem}.csv", index=False)
 
-
-def ensure_no_missing_nuts(df: pd.DataFrame, name: str) -> None:
-    if "nuts_code" not in df.columns:
-        raise ValueError(f"{name}: expected column 'nuts_code' not found.")
-    if df["nuts_code"].isna().any():
-        cols = [c for c in ["region_name_policy", "program_name"] if c in df.columns]
-        bad = df.loc[df["nuts_code"].isna(), cols].drop_duplicates()
-        raise ValueError(
-            f"{name}: missing nuts_code after region merge.\n"
-            f"{bad.to_string(index=False)}"
-        )
-
-
-def ensure_unique_keys(df: pd.DataFrame, keys: list[str], name: str) -> None:
-    dup = df.duplicated(subset=keys, keep=False)
-    if dup.any():
-        sample = df.loc[dup, keys].drop_duplicates().head(10)
-        raise ValueError(
-            f"{name}: duplicate keys found for {keys}.\n{sample.to_string(index=False)}"
-        )
 
 
 def get_schedule_amount(
@@ -141,8 +132,7 @@ region_lookup = pd.DataFrame(
     }
 )
 
-ensure_unique_keys(region_lookup, ["region_name_policy"], "region_lookup")
-ensure_unique_keys(region_lookup, ["nuts_code"], "region_lookup")
+RegionLookupSchema.validate(region_lookup)
 
 amount_rows: list[dict] = []
 
@@ -454,12 +444,7 @@ rmi_amounts_2017 = pd.DataFrame(amount_rows).merge(
     region_lookup, on="region_name_policy", how="left", validate="m:1"
 )
 
-ensure_no_missing_nuts(rmi_amounts_2017, "rmi_amounts_2017")
-ensure_unique_keys(
-    rmi_amounts_2017,
-    ["region_name_policy", "program_name", "hh_size"],
-    "rmi_amounts_2017",
-)
+RmiAmountsSchema.validate(rmi_amounts_2017)
 
 rmi_amounts_2017["simulation_period"] = "pre_2020"
 rmi_amounts_2017["resource_concept_simulation"] = "income_before_transfers_monthly"
@@ -821,8 +806,7 @@ rmi_eligibility_2017 = pd.DataFrame(
     }
 ).merge(region_lookup, on="region_name_policy", how="left", validate="m:1")
 
-ensure_no_missing_nuts(rmi_eligibility_2017, "rmi_eligibility_2017")
-ensure_unique_keys(rmi_eligibility_2017, ["region_name_policy"], "rmi_eligibility_2017")
+RmiEligibilitySchema.validate(rmi_eligibility_2017)
 
 rmi_eligibility_2017["simulation_period"] = "pre_2020"
 rmi_eligibility_2017["resource_concept_simulation"] = "income_before_transfers_monthly"
@@ -1158,8 +1142,7 @@ rmi_coverage = pd.DataFrame(
     }
 ).merge(region_lookup, on="region_name_policy", how="left", validate="m:1")
 
-ensure_no_missing_nuts(rmi_coverage, "rmi_coverage")
-ensure_unique_keys(rmi_coverage, ["region_name_policy", "year"], "rmi_coverage")
+RmiCoverageSchema.validate(rmi_coverage)
 
 rmi_coverage["simulation_period"] = "pre_2020"
 
@@ -1449,8 +1432,7 @@ baseline_rules_2017 = pd.DataFrame(
     }
 ).merge(region_lookup, on="region_name_policy", how="left", validate="m:1")
 
-ensure_no_missing_nuts(baseline_rules_2017, "baseline_rules_2017")
-ensure_unique_keys(baseline_rules_2017, ["region_name_policy"], "baseline_rules_2017")
+BaselineRules2017Schema.validate(baseline_rules_2017)
 
 baseline_rules = expand_years(
     baseline_rules_2017,
@@ -1487,9 +1469,7 @@ baseline_schedule = baseline_schedule.rename(
 
 baseline_schedule["schedule_included_main_baseline"] = True
 
-ensure_unique_keys(
-    baseline_schedule, ["nuts_code", "year", "hh_size"], "baseline_schedule"
-)
+BaselineScheduleSchema.validate(baseline_schedule)
 
 baseline_amount_summary = rmi_amounts_full.groupby(
     ["nuts_code", "region_name_policy", "year"], as_index=False
@@ -1505,9 +1485,7 @@ baseline_amount_summary = rmi_amounts_full.groupby(
     notes_amount=("notes", "first"),
 )
 
-ensure_unique_keys(
-    baseline_amount_summary, ["nuts_code", "year"], "baseline_amount_summary"
-)
+BaselineAmountSummarySchema.validate(baseline_amount_summary)
 
 baseline_rules = baseline_rules.merge(
     baseline_amount_summary.drop(columns=["region_name_policy"]),
@@ -1516,7 +1494,7 @@ baseline_rules = baseline_rules.merge(
     validate="1:1",
 )
 
-ensure_unique_keys(baseline_rules, ["nuts_code", "year"], "baseline_rules")
+BaselineRulesSchema.validate(baseline_rules)
 
 baseline_rules["baseline_has_listed_schedule"] = baseline_rules[
     "simple_schedule"
