@@ -162,11 +162,6 @@ def recode_yes_no(code: pd.Series) -> pd.Series:
     return pd.Series(out, index=code.index, dtype="float64")
 
 
-def clean_nonnegative_num(s: pd.Series) -> pd.Series:
-    x = to_num(s)
-    return x.mask(x < 0, np.nan)
-
-
 def recode_nationality_foreign(code: pd.Series) -> pd.Series:
     x = to_num(code)
     out = np.where(x.eq(1), 0.0, np.where(x.notna(), 1.0, np.nan))
@@ -426,7 +421,7 @@ def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame |
             get_series(tp, SCHEMA["tp"]["nationality"], numeric=True)
         )
 
-        tp["social_assistance_income_annual"] = clean_nonnegative_num(
+        tp["social_assistance_income_annual"] = clean_nonnegative(
             get_series(
                 tp, SCHEMA["tp"]["social_assistance_income_annual"], numeric=True
             )
