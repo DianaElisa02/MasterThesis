@@ -70,49 +70,90 @@ def add_multi_nucleus_proxy(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def apply_additional_institutional_rules(df: pd.DataFrame) -> pd.DataFrame:
+def apply_wealth_test(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Set rmi_wealth_eligible based on the region's asset exclusion rule.
+
+    Two field-name variants encode the same strict asset-proxy exclusion:
+    'proxy_asset_exclusion_strict' and 'strict_proxy_exclusion'. A household
+    passes if wealth_proxy_strict == 0 (no detected assets). Regions with no
+    wealth test ('none') always pass. Result is NaN when the test type is
+    unrecognised or the proxy is unobserved.
+    """
     out = df.copy()
 
+    has_strict_wealth_test = out["baseline_wealth_test"].isin(
+        ["proxy_asset_exclusion_strict", "strict_proxy_exclusion"]
+    )
+    no_wealth_test = out["baseline_wealth_test"].eq("none")
+    wealth_observable = out["wealth_proxy_strict"].notna()
+    passes_wealth_proxy = (out["wealth_proxy_strict"] == 0).astype(float)
+
     out["rmi_wealth_eligible"] = np.select(
-        [
-            out["baseline_wealth_test"].isin(
-                ["proxy_asset_exclusion_strict", "strict_proxy_exclusion"]
-            )
-            & out["wealth_proxy_strict"].notna(),
-            out["baseline_wealth_test"].eq("none"),
-        ],
-        [
-            (out["wealth_proxy_strict"] == 0).astype(float),
-            1.0,
-        ],
+        [has_strict_wealth_test & wealth_observable, no_wealth_test],
+        [passes_wealth_proxy, 1.0],
         default=np.nan,
     )
 
-    allowed_simple_types = (
+    return out
+
+
+def apply_household_type_gate(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Set rmi_hhtype_eligible based on the region's allowed household-composition rule.
+
+    Three tiers are defined by baseline_allowed_hh_types:
+    - 'all_household_types': every composition passes.
+    - 'single_adult_single_parent_two_adults_only': only simple types pass.
+    - 'single_adult_single_parent_two_adults_plus_restricted_threeplus': simple types
+      plus threeplus households with no evidence of multiple cohabiting units
+      (multi_nucleus_proxy == 0).
+    Result is NaN for unrecognised rule codes.
+    """
+    out = df.copy()
+
+    is_simple_type = (
         out["single_adult"].eq(1) | out["single_parent"].eq(1) | out["two_adults"].eq(1)
     )
-
-    allowed_restricted_threeplus = out["threeplus_adults"].eq(1) & out[
-        "multi_nucleus_proxy"
-    ].eq(0)
+    is_single_nucleus_threeplus = out["threeplus_adults"].eq(1) & out["multi_nucleus_proxy"].eq(0)
 
     out["rmi_hhtype_eligible"] = np.select(
         [
             out["baseline_allowed_hh_types"].eq("all_household_types"),
-            out["baseline_allowed_hh_types"].eq(
-                "single_adult_single_parent_two_adults_only"
-            ),
+            out["baseline_allowed_hh_types"].eq("single_adult_single_parent_two_adults_only"),
             out["baseline_allowed_hh_types"].eq(
                 "single_adult_single_parent_two_adults_plus_restricted_threeplus"
             ),
         ],
         [
             1.0,
-            allowed_simple_types.astype(float),
-            (allowed_simple_types | allowed_restricted_threeplus).astype(float),
+            is_simple_type.astype(float),
+            (is_simple_type | is_single_nucleus_threeplus).astype(float),
         ],
         default=np.nan,
     )
+
+    return out
+
+
+def apply_threeplus_adults_rule(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Set rmi_threeplus_adults_allowed based on the region's three-plus-adults policy.
+
+    Regions with baseline_threeplus_rule == 'allow_all' skip this gate (always 1).
+    Others use baseline_exclude_threeplus_adults:
+    - True  (hard exclusion): threeplus households are never eligible.
+    - False (soft exclusion): threeplus is allowed only for single-nucleus households
+      (multi_nucleus_proxy == 0), i.e. no evidence of multiple cohabiting family units.
+    Result is NaN when neither condition applies.
+    """
+    out = df.copy()
+
+    is_threeplus = out["threeplus_adults"].eq(1)
+    is_single_nucleus = out["multi_nucleus_proxy"].eq(0)
+
+    not_threeplus = (~is_threeplus).astype(float)
+    threeplus_ok_if_single_nucleus = np.where(is_threeplus, is_single_nucleus.astype(float), 1.0)
 
     out["rmi_threeplus_adults_allowed"] = np.select(
         [
@@ -120,15 +161,7 @@ def apply_additional_institutional_rules(df: pd.DataFrame) -> pd.DataFrame:
             out["baseline_exclude_threeplus_adults"].eq(True),
             out["baseline_exclude_threeplus_adults"].eq(False),
         ],
-        [
-            1.0,
-            (out["threeplus_adults"] != 1).astype(float),
-            np.where(
-                out["threeplus_adults"].eq(1),
-                (out["multi_nucleus_proxy"] == 0).astype(float),
-                1.0,
-            ),
-        ],
+        [1.0, not_threeplus, threeplus_ok_if_single_nucleus],
         default=np.nan,
     )
 

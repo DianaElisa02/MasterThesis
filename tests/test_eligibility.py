@@ -5,11 +5,13 @@ import pytest
 from src.eligibility import (
     add_active_inclusion_gate,
     add_multi_nucleus_proxy,
-    apply_additional_institutional_rules,
     apply_age_rule,
     apply_claimant_proxy_rule,
+    apply_household_type_gate,
     apply_labour_rule,
     apply_region_specific_insertion_rules,
+    apply_threeplus_adults_rule,
+    apply_wealth_test,
 )
 
 
@@ -133,51 +135,53 @@ class TestAddMultiNucleusProxy:
         assert result["multi_nucleus_proxy"].iloc[0] == 0.0
 
 
-# ── Wealth and household type rules ──────────────────────────────────────────
+# ── Wealth test ───────────────────────────────────────────────────────────────
 
-class TestApplyAdditionalInstitutionalRules:
-    def test_wealth_eligible_when_no_wealth_test(self):
+class TestApplyWealthTest:
+    def test_eligible_when_no_wealth_test(self):
         df = make_hh(baseline_wealth_test="none")
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_wealth_eligible"].iloc[0] == 1.0
+        assert apply_wealth_test(df)["rmi_wealth_eligible"].iloc[0] == 1.0
 
-    def test_wealth_not_eligible_when_strict_and_has_wealth(self):
+    def test_not_eligible_when_strict_and_has_wealth(self):
         df = make_hh(baseline_wealth_test="proxy_asset_exclusion_strict", wealth_proxy_strict=1)
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_wealth_eligible"].iloc[0] == 0.0
+        assert apply_wealth_test(df)["rmi_wealth_eligible"].iloc[0] == 0.0
 
-    def test_wealth_eligible_when_strict_and_no_wealth(self):
+    def test_eligible_when_strict_and_no_wealth(self):
         df = make_hh(baseline_wealth_test="proxy_asset_exclusion_strict", wealth_proxy_strict=0)
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_wealth_eligible"].iloc[0] == 1.0
+        assert apply_wealth_test(df)["rmi_wealth_eligible"].iloc[0] == 1.0
 
-    def test_wealth_eligible_with_strict_proxy_exclusion_variant(self):
+    def test_both_field_name_variants_accepted(self):
         df = make_hh(baseline_wealth_test="strict_proxy_exclusion", wealth_proxy_strict=0)
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_wealth_eligible"].iloc[0] == 1.0
+        assert apply_wealth_test(df)["rmi_wealth_eligible"].iloc[0] == 1.0
 
-    def test_hhtype_all_types_always_eligible(self):
+    def test_nan_when_strict_test_but_proxy_unobserved(self):
+        df = make_hh(baseline_wealth_test="proxy_asset_exclusion_strict",
+                     wealth_proxy_strict=float("nan"))
+        assert pd.isna(apply_wealth_test(df)["rmi_wealth_eligible"].iloc[0])
+
+
+# ── Household-type gate ───────────────────────────────────────────────────────
+
+class TestApplyHouseholdTypeGate:
+    def test_all_types_always_eligible(self):
         df = make_hh(baseline_allowed_hh_types="all_household_types", threeplus_adults=1)
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_hhtype_eligible"].iloc[0] == 1.0
+        assert apply_household_type_gate(df)["rmi_hhtype_eligible"].iloc[0] == 1.0
 
-    def test_hhtype_restricted_allows_single_adult(self):
+    def test_restricted_allows_single_adult(self):
         df = make_hh(
             baseline_allowed_hh_types="single_adult_single_parent_two_adults_only",
             single_adult=1, single_parent=0, two_adults=0, threeplus_adults=0,
         )
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_hhtype_eligible"].iloc[0] == 1.0
+        assert apply_household_type_gate(df)["rmi_hhtype_eligible"].iloc[0] == 1.0
 
-    def test_hhtype_restricted_excludes_threeplus(self):
+    def test_restricted_excludes_threeplus(self):
         df = make_hh(
             baseline_allowed_hh_types="single_adult_single_parent_two_adults_only",
             single_adult=0, single_parent=0, two_adults=0, threeplus_adults=1,
         )
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_hhtype_eligible"].iloc[0] == 0.0
+        assert apply_household_type_gate(df)["rmi_hhtype_eligible"].iloc[0] == 0.0
 
-    def test_hhtype_extended_allows_threeplus_without_multi_nucleus(self):
+    def test_extended_allows_single_nucleus_threeplus(self):
         df = make_hh(
             baseline_allowed_hh_types=(
                 "single_adult_single_parent_two_adults_plus_restricted_threeplus"
@@ -185,10 +189,9 @@ class TestApplyAdditionalInstitutionalRules:
             single_adult=0, single_parent=0, two_adults=0,
             threeplus_adults=1, multi_nucleus_proxy=0,
         )
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_hhtype_eligible"].iloc[0] == 1.0
+        assert apply_household_type_gate(df)["rmi_hhtype_eligible"].iloc[0] == 1.0
 
-    def test_hhtype_extended_excludes_threeplus_with_multi_nucleus(self):
+    def test_extended_excludes_multi_nucleus_threeplus(self):
         df = make_hh(
             baseline_allowed_hh_types=(
                 "single_adult_single_parent_two_adults_plus_restricted_threeplus"
@@ -196,8 +199,40 @@ class TestApplyAdditionalInstitutionalRules:
             single_adult=0, single_parent=0, two_adults=0,
             threeplus_adults=1, multi_nucleus_proxy=1,
         )
-        result = apply_additional_institutional_rules(df)
-        assert result["rmi_hhtype_eligible"].iloc[0] == 0.0
+        assert apply_household_type_gate(df)["rmi_hhtype_eligible"].iloc[0] == 0.0
+
+
+# ── Three-plus adults rule ────────────────────────────────────────────────────
+
+class TestApplyThreeplusAdultsRule:
+    def test_allow_all_rule_passes_threeplus(self):
+        df = make_hh(baseline_threeplus_rule="allow_all", threeplus_adults=1)
+        assert apply_threeplus_adults_rule(df)["rmi_threeplus_adults_allowed"].iloc[0] == 1.0
+
+    def test_hard_exclusion_blocks_threeplus(self):
+        df = make_hh(baseline_threeplus_rule="other", baseline_exclude_threeplus_adults=True,
+                     threeplus_adults=1)
+        assert apply_threeplus_adults_rule(df)["rmi_threeplus_adults_allowed"].iloc[0] == 0.0
+
+    def test_hard_exclusion_passes_non_threeplus(self):
+        df = make_hh(baseline_threeplus_rule="other", baseline_exclude_threeplus_adults=True,
+                     threeplus_adults=0)
+        assert apply_threeplus_adults_rule(df)["rmi_threeplus_adults_allowed"].iloc[0] == 1.0
+
+    def test_soft_exclusion_allows_single_nucleus_threeplus(self):
+        df = make_hh(baseline_threeplus_rule="other", baseline_exclude_threeplus_adults=False,
+                     threeplus_adults=1, multi_nucleus_proxy=0)
+        assert apply_threeplus_adults_rule(df)["rmi_threeplus_adults_allowed"].iloc[0] == 1.0
+
+    def test_soft_exclusion_blocks_multi_nucleus_threeplus(self):
+        df = make_hh(baseline_threeplus_rule="other", baseline_exclude_threeplus_adults=False,
+                     threeplus_adults=1, multi_nucleus_proxy=1)
+        assert apply_threeplus_adults_rule(df)["rmi_threeplus_adults_allowed"].iloc[0] == 0.0
+
+    def test_soft_exclusion_always_passes_non_threeplus(self):
+        df = make_hh(baseline_threeplus_rule="other", baseline_exclude_threeplus_adults=False,
+                     threeplus_adults=0)
+        assert apply_threeplus_adults_rule(df)["rmi_threeplus_adults_allowed"].iloc[0] == 1.0
 
 
 # ── Labour rule ───────────────────────────────────────────────────────────────

@@ -13,11 +13,13 @@ from src.eligibility import (
     add_active_inclusion_gate,
     add_multi_nucleus_proxy,
     add_percentile_filter,
-    apply_additional_institutional_rules,
     apply_age_rule,
     apply_claimant_proxy_rule,
+    apply_household_type_gate,
     apply_labour_rule,
     apply_region_specific_insertion_rules,
+    apply_threeplus_adults_rule,
+    apply_wealth_test,
 )
 from src.io import (
     load_inputs,
@@ -80,7 +82,9 @@ def main() -> None:
     sim = assign_guaranteed_amount(sim)
     sim = add_percentile_filter(sim, PERCENTILE_FILTER)
     sim = add_multi_nucleus_proxy(sim)
-    sim = apply_additional_institutional_rules(sim)
+    sim = apply_wealth_test(sim)
+    sim = apply_household_type_gate(sim)
+    sim = apply_threeplus_adults_rule(sim)
     sim = apply_labour_rule(sim, labour_income_limit=LABOUR_INCOME_MONTHLY_LIMIT)
     sim = apply_region_specific_insertion_rules(sim)
     sim = compute_income_gap(sim)
