@@ -8,6 +8,10 @@ import pandas as pd
 
 from src.constants import HOUSEHOLD_REQUIRED_COLUMNS
 
+EXCLUDED_SIMULATION_REGIONS = {
+    "ES63",  # Ceuta excluded because it is not in the household data used for the main simulation
+}
+
 BASE_PATH = Path(r".").resolve()
 
 INPUT_HH = BASE_PATH / "ecv_household_clean.parquet"
@@ -179,8 +183,7 @@ def prepare_households(hh: pd.DataFrame) -> pd.DataFrame:
 
     out["hh_size_rule"] = out["household_size"].round().astype("Int64")
 
-    # Ceuta excluded because it is not in the household data used for the main simulation
-    out = out.loc[out["nuts_code"] != "ES63"].copy()
+    out = out.loc[~out["nuts_code"].isin(EXCLUDED_SIMULATION_REGIONS)].copy()
 
     logger.info("Prepared pre-period baseline household rows: %s", len(out))
     return out
