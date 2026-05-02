@@ -7,6 +7,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from src.constants import PERSON_HOUSEHOLD_COLUMNS
 from src.extractors import extract_section, load_td_clean, load_th_clean, read_dta
 from src.schema_loader import load_ecv_schema
 from src.schemas import (
@@ -431,203 +432,269 @@ def check_person_household_linkage(
         )
 
 
-def summarise_household(group: pd.DataFrame) -> pd.Series:
-    age = pd.to_numeric(group["age"], errors="coerce")
-    agw = group["activity_group_working_age"].astype("string")
+def household_partner_proxy(person: pd.DataFrame) -> pd.DataFrame:
+    pairs = person.loc[
+        person["partner_id"].notna() & ~person["partner_id"].isin(["0", ""]),
+        ["household_id", "person_id", "partner_id"],
+    ].copy()
 
-    n_persons = len(group)
-    n_age_missing = int(age.isna().sum())
-    age_complete = float(n_age_missing == 0)
+    if pairs.empty:
+        return pd.DataFrame(columns=["household_id", "couple_present_partner_proxy"])
 
-    n_adults = int((age >= 18).sum(skipna=True))
-    n_children = int((age < 18).sum(skipna=True))
-    n_adults_18plus = n_adults
-    n_adults_23plus = int((age >= 23).sum(skipna=True))
-    n_adults_25plus = int((age >= 25).sum(skipna=True))
+    pairs["household_id"] = pairs["household_id"].astype("string")
+    pairs["person_id"] = pairs["person_id"].astype("string")
+    pairs["partner_id"] = pairs["partner_id"].astype("string")
 
-    n_working = int((agw == "working").sum())
-    n_unemployed = int((agw == "unemployed").sum())
-    n_inactive = int((agw == "inactive").sum())
-    n_missing = int(agw.isna().sum())
+    pairs = pairs.loc[
+        pairs["person_id"].notna()
+        & pairs["partner_id"].notna()
+        & ~pairs["partner_id"].isin(["0", ""])
+        & pairs["person_id"].ne(pairs["partner_id"])
+    ].drop_duplicates()
 
-    n_working_age = int(((age >= 18) & (age <= 64)).sum(skipna=True))
-
-    labour_income_annual = pd.to_numeric(
-        group["labour_income_person_annual"], errors="coerce"
-    )
-    labour_income_monthly = labour_income_annual / 12
-
-    reciprocal_links = 0
-    g2 = group[["person_id", "partner_id"]].copy()
-    g2["person_id"] = g2["person_id"].astype("string")
-    g2["partner_id"] = g2["partner_id"].astype("string")
-
-    for _, row in g2.dropna().iterrows():
-        pid = row["person_id"]
-        partner = row["partner_id"]
-        partner_row = g2.loc[g2["person_id"] == partner, ["partner_id"]]
-        if not partner_row.empty and partner_row["partner_id"].eq(pid).any():
-            reciprocal_links += 1
-
-    couple_present_partner_proxy = float(reciprocal_links >= 2)
-
-    single_adult = (
-        float((n_adults == 1) and (n_children == 0)) if age_complete == 1 else np.nan
-    )
-    single_parent = (
-        float((n_adults == 1) and (n_children > 0)) if age_complete == 1 else np.nan
-    )
-    two_adults = float(n_adults == 2) if age_complete == 1 else np.nan
-    threeplus_adults = float(n_adults >= 3) if age_complete == 1 else np.nan
-    children_present = float(n_children > 0) if age_complete == 1 else np.nan
-
-    labour_observed = float(group["labour_file_available"].eq(1).all())
-
-    active_search = pd.to_numeric(group["active_job_search"], errors="coerce")
-    social_assist = pd.to_numeric(
-        group["social_assistance_income_annual"], errors="coerce"
-    )
-    foreign_nat = pd.to_numeric(group["foreign_nationality"], errors="coerce")
-
-    n_students_18_64 = int(
-        (
-            (group["activity_status_detail"] == "student") & group["working_age_18_64"]
-        ).sum()
-    )
-    n_retired_18_64 = int(
-        (
-            (group["activity_status_detail"] == "retired") & group["working_age_18_64"]
-        ).sum()
-    )
-    n_disabled_18_64 = int(
-        (
-            (group["activity_status_detail"] == "permanently_disabled")
-            & group["working_age_18_64"]
-        ).sum()
-    )
-
-    any_active_job_search = (
-        float(active_search.eq(1).any()) if active_search.notna().any() else np.nan
-    )
-    all_unemployed_searching = (
-        float(
-            active_search[group["activity_group_working_age"] == "unemployed"]
-            .eq(1)
-            .all()
-        )
-        if (group["activity_group_working_age"] == "unemployed").any()
-        else np.nan
-    )
-
-    hh_social_assistance_income_annual = (
-        float(social_assist.sum(skipna=True)) if social_assist.notna().any() else np.nan
-    )
-    any_social_assistance_income_hh = (
-        float(social_assist.gt(0).any()) if social_assist.notna().any() else np.nan
-    )
-    any_foreign_nationality_hh = (
-        float(foreign_nat.eq(1).any()) if foreign_nat.notna().any() else np.nan
-    )
-
-    return pd.Series(
-        {
-            "n_persons": n_persons,
-            "n_age_missing": n_age_missing,
-            "age_composition_complete": age_complete,
-            "n_adults": n_adults,
-            "n_children": n_children,
-            "n_adults_18plus": n_adults_18plus,
-            "n_adults_23plus": n_adults_23plus,
-            "n_adults_25plus": n_adults_25plus,
-            "single_adult": single_adult,
-            "single_parent": single_parent,
-            "two_adults": two_adults,
-            "threeplus_adults": threeplus_adults,
-            "children_present": children_present,
-            "couple_present_partner_proxy": couple_present_partner_proxy,
-            "n_working_18_64": n_working,
-            "n_unemployed_18_64": n_unemployed,
-            "n_inactive_18_64": n_inactive,
-            "n_missing_18_64": n_missing,
-            "any_working_18_64": float(n_working > 0),
-            "any_unemployed_18_64": float(n_unemployed > 0),
-            "all_working_age_nonworking": float(
-                (n_working_age > 0) and (n_working == 0)
-            ),
-            "person_composition_observed": 1.0,
-            "labour_observed": labour_observed,
-            "labour_income_hh_annual": float(labour_income_annual.sum(skipna=True))
-            if labour_income_annual.notna().any()
-            else np.nan,
-            "labour_income_hh_monthly": float(labour_income_monthly.sum(skipna=True))
-            if labour_income_monthly.notna().any()
-            else np.nan,
-            "any_positive_labour_income": float(labour_income_annual.gt(0).any())
-            if labour_income_annual.notna().any()
-            else np.nan,
-            "n_students_18_64": n_students_18_64,
-            "n_retired_18_64": n_retired_18_64,
-            "n_disabled_18_64": n_disabled_18_64,
-            "any_active_job_search": any_active_job_search,
-            "all_unemployed_searching": all_unemployed_searching,
-            "hh_social_assistance_income_annual": hh_social_assistance_income_annual,
-            "any_social_assistance_income_hh": any_social_assistance_income_hh,
-            "any_foreign_nationality_hh": any_foreign_nationality_hh,
+    reverse = pairs.rename(
+        columns={
+            "person_id": "partner_id",
+            "partner_id": "person_id",
         }
     )
 
-
-def build_household_composition(
-    person: pd.DataFrame | None, hh_ids: pd.Series
-) -> pd.DataFrame:
-    if person is None or person.empty:
-        out = pd.DataFrame({"household_id": hh_ids.drop_duplicates()})
-        cols = [
-            "n_persons",
-            "n_age_missing",
-            "age_composition_complete",
-            "n_adults",
-            "n_children",
-            "n_adults_18plus",
-            "n_adults_23plus",
-            "n_adults_25plus",
-            "single_adult",
-            "single_parent",
-            "two_adults",
-            "threeplus_adults",
-            "children_present",
-            "couple_present_partner_proxy",
-            "n_working_18_64",
-            "n_unemployed_18_64",
-            "n_inactive_18_64",
-            "n_missing_18_64",
-            "any_working_18_64",
-            "any_unemployed_18_64",
-            "all_working_age_nonworking",
-            "labour_income_hh_annual",
-            "labour_income_hh_monthly",
-            "any_positive_labour_income",
-            "n_students_18_64",
-            "n_retired_18_64",
-            "n_disabled_18_64",
-            "any_active_job_search",
-            "all_unemployed_searching",
-            "hh_social_assistance_income_annual",
-            "any_social_assistance_income_hh",
-            "any_foreign_nationality_hh",
-        ]
-        for c in cols:
-            out[c] = np.nan
-        out["person_composition_observed"] = 0.0
-        out["labour_observed"] = 0.0
-        return out
+    reciprocal = pairs.merge(
+        reverse,
+        on=["household_id", "person_id", "partner_id"],
+        how="inner",
+    )
 
     out = (
-        person.groupby("household_id", dropna=False)
-        .apply(summarise_household)
+        reciprocal.groupby("household_id")
+        .size()
+        .rename("n_reciprocal_partner_links")
         .reset_index()
     )
-    return HouseholdCompositionSchema.validate(out)
+
+    out["couple_present_partner_proxy"] = (
+        out["n_reciprocal_partner_links"].ge(2).astype(float)
+    )
+
+    return out[["household_id", "couple_present_partner_proxy"]]
+
+
+def add_person_flags(person: pd.DataFrame) -> pd.DataFrame:
+    p = person.copy()
+
+    age = pd.to_numeric(p["age"], errors="coerce")
+    agw = p["activity_group_working_age"].astype("string")
+    status = p["activity_status_detail"].astype("string")
+
+    active_search = pd.to_numeric(p["active_job_search"], errors="coerce")
+    labour_income = pd.to_numeric(p["labour_income_person_annual"], errors="coerce")
+    social_assist = pd.to_numeric(p["social_assistance_income_annual"], errors="coerce")
+    foreign_nat = pd.to_numeric(p["foreign_nationality"], errors="coerce")
+
+    p["age_missing"] = age.isna()
+    p["is_adult"] = age.ge(18)
+    p["is_child"] = age.lt(18)
+    p["is_adult_23plus"] = age.ge(23)
+    p["is_adult_25plus"] = age.ge(25)
+    p["is_working_age"] = age.between(18, 64, inclusive="both")
+
+    p["is_working_18_64"] = agw.eq("working")
+    p["is_unemployed_18_64"] = agw.eq("unemployed")
+    p["is_inactive_18_64"] = agw.eq("inactive")
+    p["activity_missing_18_64"] = agw.isna()
+
+    p["is_student_18_64"] = status.eq("student") & p["is_working_age"]
+    p["is_retired_18_64"] = status.eq("retired") & p["is_working_age"]
+    p["is_disabled_18_64"] = status.eq("permanently_disabled") & p["is_working_age"]
+
+    p["active_job_search_known"] = active_search.notna().fillna(False)
+    p["active_job_search_1"] = active_search.eq(1).fillna(False)
+
+    p["unemployed_search_failure"] = p["is_unemployed_18_64"].fillna(False) & ~p[
+        "active_job_search_1"
+    ].fillna(False)
+
+    # For all_unemployed_searching:
+    # If someone is unemployed and active_search != 1, then the household fails.
+    # Missing active_search counts as not searching, matching your old .eq(1).all() logic.
+    p["unemployed_search_failure"] = (
+        p["is_unemployed_18_64"] & ~p["active_job_search_1"]
+    )
+
+    p["labour_income_person_annual_num"] = labour_income
+    p["labour_income_known"] = labour_income.notna()
+    p["positive_labour_income"] = labour_income.gt(0)
+
+    p["social_assistance_income_annual_num"] = social_assist
+    p["social_assistance_known"] = social_assist.notna()
+    p["positive_social_assistance_income"] = social_assist.gt(0)
+
+    p["foreign_nationality_known"] = foreign_nat.notna()
+    p["foreign_nationality_1"] = foreign_nat.eq(1)
+
+    p["labour_file_available_1"] = pd.to_numeric(
+        p["labour_file_available"], errors="coerce"
+    ).eq(1)
+
+    return p
+
+
+def build_household_composition(
+    person: pd.DataFrame | None,
+    hh_ids: pd.Series,
+) -> pd.DataFrame:
+    if person is None or person.empty:
+        return empty_household_composition(hh_ids)
+
+    p = add_person_flags(person)
+    g = p.groupby("household_id", dropna=False)
+
+    out = g.agg(
+        n_persons=("person_id", "size"),
+        n_age_missing=("age_missing", "sum"),
+        n_adults=("is_adult", "sum"),
+        n_children=("is_child", "sum"),
+        n_adults_23plus=("is_adult_23plus", "sum"),
+        n_adults_25plus=("is_adult_25plus", "sum"),
+        n_working_18_64=("is_working_18_64", "sum"),
+        n_unemployed_18_64=("is_unemployed_18_64", "sum"),
+        n_inactive_18_64=("is_inactive_18_64", "sum"),
+        n_missing_18_64=("activity_missing_18_64", "sum"),
+        n_working_age=("is_working_age", "sum"),
+        n_students_18_64=("is_student_18_64", "sum"),
+        n_retired_18_64=("is_retired_18_64", "sum"),
+        n_disabled_18_64=("is_disabled_18_64", "sum"),
+        labour_observed=("labour_file_available_1", "min"),
+        any_active_job_search=("active_job_search_1", "max"),
+        active_job_search_known=("active_job_search_known", "max"),
+        unemployed_search_failure=("unemployed_search_failure", "max"),
+        any_positive_labour_income=("positive_labour_income", "max"),
+        labour_income_known=("labour_income_known", "max"),
+        any_social_assistance_income_hh=("positive_social_assistance_income", "max"),
+        social_assistance_known=("social_assistance_known", "max"),
+        any_foreign_nationality_hh=("foreign_nationality_1", "max"),
+        foreign_nationality_known=("foreign_nationality_known", "max"),
+    )
+
+    # NaN-aware sums. This preserves the old behavior: if all values are missing, household value should be NaN, not 0.
+    out["labour_income_hh_annual"] = g["labour_income_person_annual_num"].sum(
+        min_count=1
+    )
+    out["hh_social_assistance_income_annual"] = g[
+        "social_assistance_income_annual_num"
+    ].sum(min_count=1)
+
+    out = out.reset_index()
+
+    out["age_composition_complete"] = out["n_age_missing"].eq(0).astype(float)
+    out["n_adults_18plus"] = out["n_adults"]
+
+    age_complete = out["age_composition_complete"].eq(1)
+
+    out["single_adult"] = np.where(
+        age_complete,
+        out["n_adults"].eq(1) & out["n_children"].eq(0),
+        np.nan,
+    ).astype(float)
+
+    out["single_parent"] = np.where(
+        age_complete,
+        out["n_adults"].eq(1) & out["n_children"].gt(0),
+        np.nan,
+    ).astype(float)
+
+    out["two_adults"] = np.where(
+        age_complete,
+        out["n_adults"].eq(2),
+        np.nan,
+    ).astype(float)
+
+    out["threeplus_adults"] = np.where(
+        age_complete,
+        out["n_adults"].ge(3),
+        np.nan,
+    ).astype(float)
+
+    out["children_present"] = np.where(
+        age_complete,
+        out["n_children"].gt(0),
+        np.nan,
+    ).astype(float)
+
+    out["any_working_18_64"] = out["n_working_18_64"].gt(0).astype(float)
+    out["any_unemployed_18_64"] = out["n_unemployed_18_64"].gt(0).astype(float)
+
+    out["all_working_age_nonworking"] = (
+        out["n_working_age"].gt(0) & out["n_working_18_64"].eq(0)
+    ).astype(float)
+
+    out["labour_income_hh_monthly"] = out["labour_income_hh_annual"] / 12
+
+    unemployed_search_failure = (
+        out["unemployed_search_failure"].fillna(False).astype(bool)
+    )
+
+    out["all_unemployed_searching"] = np.where(
+        out["n_unemployed_18_64"].gt(0),
+        ~unemployed_search_failure,
+        np.nan,
+    ).astype(float)
+
+    # Restore old NaN behavior for "any" variables.
+    out["any_active_job_search"] = np.where(
+        out["active_job_search_known"],
+        out["any_active_job_search"],
+        np.nan,
+    ).astype(float)
+
+    out["any_positive_labour_income"] = np.where(
+        out["labour_income_known"],
+        out["any_positive_labour_income"],
+        np.nan,
+    ).astype(float)
+
+    out["any_social_assistance_income_hh"] = np.where(
+        out["social_assistance_known"],
+        out["any_social_assistance_income_hh"],
+        np.nan,
+    ).astype(float)
+
+    out["any_foreign_nationality_hh"] = np.where(
+        out["foreign_nationality_known"],
+        out["any_foreign_nationality_hh"],
+        np.nan,
+    ).astype(float)
+
+    out["person_composition_observed"] = 1.0
+    out["labour_observed"] = out["labour_observed"].astype(float)
+
+    # Keep this until partner proxy is vectorized separately.
+    partner_proxy = household_partner_proxy(p)
+
+    out = out.merge(
+        partner_proxy,
+        on="household_id",
+        how="left",
+        validate="1:1",
+    )
+
+    out["couple_present_partner_proxy"] = (
+        out["couple_present_partner_proxy"].fillna(0.0).astype(float)
+    )
+
+    # Drop internal helper columns.
+    out = out.drop(
+        columns=[
+            "n_working_age",
+            "active_job_search_known",
+            "unemployed_search_failure",
+            "labour_income_known",
+            "social_assistance_known",
+            "foreign_nationality_known",
+        ]
+    )
+
+    return HouseholdCompositionSchema.validate(out, lazy=True)
 
 
 def build_responsible_person_proxies(
@@ -931,6 +998,9 @@ def process_year(
 
     person = load_person_clean(paths["tr"], paths["tp"], year)
 
+    if person is None:
+        raise Exception(f"No person correctly loaded from year {year}")
+
     check_person_household_linkage(person, th["household_id"], year)
 
     hh_comp = build_household_composition(person, th["household_id"])
@@ -953,48 +1023,16 @@ def process_year(
 
     hh = derive_household_variables(hh, year)
     hh.to_parquet(hh_cache, index=False)
+    hh_context = hh[PERSON_HOUSEHOLD_COLUMNS].copy()
 
-    if person is None:
-        person_out = pd.DataFrame()
-    else:
-        hh_context = hh[
-            [
-                "household_id",
-                "year",
-                "region_code",
-                "region_name",
-                "weight_hh",
-                "household_size",
-                "n_adults",
-                "n_children",
-                "income_before_transfers_annual",
-                "income_after_transfers_annual",
-                "resources_proxy_baseline_monthly",
-                "resources_proxy_excl_capital_monthly",
-                "labour_income_hh_annual",
-                "labour_income_hh_monthly",
-                "any_positive_labour_income",
-                "wealth_proxy_strict",
-                "any_active_job_search",
-                "all_unemployed_searching",
-                "hh_social_assistance_income_annual",
-                "any_social_assistance_income_hh",
-                "any_foreign_nationality_hh",
-                "any_responsible_person_claimant_eligible",
-                "any_responsible_person_active_search",
-                "poverty",
-                "matdep",
-            ]
-        ].copy()
-
-        person_out = safe_left_merge(
-            person,
-            hh_context,
-            on="household_id",
-            validate="m:1",
-            left_name="person",
-            right_name="hh_context",
-        )
+    person_out = safe_left_merge(
+        person,
+        hh_context,
+        on="household_id",
+        validate="m:1",
+        left_name="person",
+        right_name="hh_context",
+    )
 
     person_out.to_parquet(person_cache, index=False)
     return hh, person_out
