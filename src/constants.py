@@ -20,3 +20,33 @@ REGION_NAME_MAP = {
     "ES70": "Canarias",
     "ESZZ": "Extra-Regio",
 }
+
+PERSON_HOUSEHOLD_COLUMNS = [
+    "household_id",
+    "year",
+    "region_code",
+    "region_name",
+    "weight_hh",
+    "household_size",
+    "n_adults",
+    "n_children",
+    "income_before_transfers_annual",
+    "income_after_transfers_annual",
+    "resources_proxy_baseline_monthly",
+    "resources_proxy_excl_capital_monthly",
+    "labour_income_hh_annual",
+    "labour_income_hh_monthly",
+    "any_positive_labour_income",
+    "wealth_proxy_strict",
+    "any_active_job_search",
+    "all_unemployed_searching",
+    "hh_social_assistance_income_annual",
+    "any_social_assistance_income_hh",
+    "any_foreign_nationality_hh",
+    "any_responsible_person_claimant_eligible",
+    "any_responsible_person_active_search",
+    "poverty",
+    "matdep",
+]
+
+MAX_REASONABLE_AGE = 125

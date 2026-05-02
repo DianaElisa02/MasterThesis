@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pandera.pandas as pa
 
+from src.constants import MAX_REASONABLE_AGE
+
 # ── Data-cleaning outputs ─────────────────────────────────────────────────────
 
 TdSchema = pa.DataFrameSchema(
@@ -32,7 +34,9 @@ TpSchema = pa.DataFrameSchema(
 PersonSchema = pa.DataFrameSchema(
     {
         "person_id": pa.Column(nullable=False, unique=True),
-        "age": pa.Column(nullable=True, checks=[pa.Check.ge(0), pa.Check.le(110)]),
+        "age": pa.Column(
+            nullable=True, checks=[pa.Check.ge(0), pa.Check.le(MAX_REASONABLE_AGE)]
+        ),
         "sex": pa.Column(nullable=True, checks=pa.Check.isin(["male", "female"])),
     }
 )
