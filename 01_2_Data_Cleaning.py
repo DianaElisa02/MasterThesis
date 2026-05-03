@@ -132,6 +132,52 @@ def clean_nonnegative(s: pd.Series) -> pd.Series:
     x = to_num(s)
     return x.mask(x < 0, np.nan)
 
+def add_missing_tp_columns(person: pd.DataFrame) -> pd.DataFrame:
+    p = person.copy()
+    tp_cols: dict[str, pd.Series] = {
+        "weight_p":                          empty_num(p.index),
+        "weight_selected_resp":              empty_num(p.index),
+        "person_weight_preferred":           empty_num(p.index),
+        "activity_status_detail":            empty_str(p.index),
+        "activity_group":                    empty_str(p.index),
+        "active_job_search":                 empty_num(p.index),
+        "currently_in_education":            empty_num(p.index),
+        "foreign_nationality":               empty_num(p.index),
+        "social_assistance_income_annual":   empty_num(p.index),
+        "any_social_assistance_income":      empty_num(p.index),
+        "employee_cash_income_net_annual":   empty_num(p.index),
+        "employee_noncash_income_net_annual":empty_num(p.index),
+        "selfemployment_income_net_annual":  empty_num(p.index),
+        "labour_income_person_annual":       empty_num(p.index),
+        "labour_income_person_monthly":      empty_num(p.index),
+    }
+    for col, val in tp_cols.items():
+        if col not in p.columns:
+            p[col] = val
+    return p
+
+
+def empty_household_composition(hh_ids: pd.Series) -> pd.DataFrame:
+    ids = pd.Series(hh_ids, dtype="string").dropna().drop_duplicates()
+    out = pd.DataFrame({"household_id": ids})
+    num_cols = [
+        "n_persons", "n_age_missing", "n_adults", "n_children",
+        "n_adults_23plus", "n_adults_25plus", "n_working_18_64",
+        "n_unemployed_18_64", "n_inactive_18_64", "n_missing_18_64",
+        "n_students_18_64", "n_retired_18_64", "n_disabled_18_64",
+        "labour_observed", "any_active_job_search", "any_positive_labour_income",
+        "any_social_assistance_income_hh", "any_foreign_nationality_hh",
+        "labour_income_hh_annual", "labour_income_hh_monthly",
+        "hh_social_assistance_income_annual", "age_composition_complete",
+        "n_adults_18plus", "single_adult", "single_parent", "two_adults",
+        "threeplus_adults", "children_present", "any_working_18_64",
+        "any_unemployed_18_64", "all_working_age_nonworking",
+        "all_unemployed_searching", "couple_present_partner_proxy",
+        "person_composition_observed",
+    ]
+    for col in num_cols:
+        out[col] = np.nan
+    return out
 
 def safe_left_merge(
     left: pd.DataFrame,
