@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from turtle import pd
+
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_gap,
+    compute_income_concept_versions,
     finalize_entitlement,
 )
 from src.eligibility import (
@@ -30,6 +31,7 @@ from src.summaries import (
     make_year_summary,
     make_wealth_sensitivity_table,
     make_labour_sensitivity_table,
+    make_income_sensitivity_table,
 )
 
 BASE_PATH = Path(".").resolve()
@@ -49,6 +51,7 @@ OUTPUT_REGION   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_region_summary.parquet"
 OUTPUT_REGION_DIAG = BASE_PATH / f"rmi_baseline_{RUN_TAG}_region_diagnostic.parquet"
 OUTPUT_WEALTH   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_wealth_sensitivity.parquet"
 OUTPUT_LABOUR   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_labour_sensitivity.parquet"
+OUTPUT_INCOME = BASE_PATH / f"rmi_baseline_{RUN_TAG}_income_sensitivity.parquet"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
@@ -73,8 +76,9 @@ def main() -> None:
     sim = finalize_entitlement(sim)
     sim = compute_wealth_versions(sim)
     sim = compute_labour_gate_versions(sim)
+    sim = compute_income_concept_versions(sim)
 
-    print("\nRP activity status value counts:")
+
     print(sim["rp1_activity_status_detail"].value_counts(dropna=False).head(10))
 
     print("\nRP active job search value counts:")
@@ -83,7 +87,6 @@ def main() -> None:
     print("\nresponsible_person_proxy_available value counts:")
     print(sim["responsible_person_proxy_available"].value_counts(dropna=False))
 
-    print("\nlabour_universal value counts:")
     print(sim["labour_universal"].value_counts(dropna=False))
 
     rp1_unemployed = sim["rp1_activity_status_detail"].eq("unemployed")
@@ -100,6 +103,7 @@ def main() -> None:
     region_diag = make_region_diagnostic_table(sim)
     wealth_sensitivity = make_wealth_sensitivity_table(sim)
     labour_sensitivity = make_labour_sensitivity_table(sim)
+    income_sensitivity = make_income_sensitivity_table(sim)
 
     print("\n" + "=" * 80)
     print("PRE-POLICY RMI SIMULATION — RAW SIMULATED COUNTS")
@@ -163,6 +167,18 @@ def main() -> None:
     digits=3,
     )
 
+    print("\n" + "=" * 70)
+    print("INCOME CONCEPT SENSITIVITY")
+    print("=" * 70)
+    print_compact_table(
+    income_sensitivity,
+    title="Simulated households by income concept and year",
+    columns=["income_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    sort_by=["year", "income_version"],
+    ascending=True,
+    digits=3,
+    )
+
 
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)
@@ -171,7 +187,7 @@ def main() -> None:
     region_diag.to_parquet(OUTPUT_REGION_DIAG, index=False)
     wealth_sensitivity.to_parquet(OUTPUT_WEALTH, index=False)
     labour_sensitivity.to_parquet(OUTPUT_LABOUR, index=False)
-
+    income_sensitivity.to_parquet(OUTPUT_INCOME, index=False)
     logger.info("Saved household simulation file to %s", OUTPUT_HH)
     logger.info("Saved CSV copy to %s", OUTPUT_CSV)
     logger.info("Saved year summary to %s", OUTPUT_YEAR)
@@ -179,7 +195,7 @@ def main() -> None:
     logger.info("Saved region diagnostic to %s", OUTPUT_REGION_DIAG)
     logger.info("Saved wealth sensitivity to %s", OUTPUT_WEALTH)
     logger.info("Saved labour sensitivity to %s", OUTPUT_LABOUR)
-
+    logger.info("Saved income sensitivity to %s", OUTPUT_INCOME)
 
 if __name__ == "__main__":
     main()

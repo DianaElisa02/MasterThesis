@@ -379,3 +379,27 @@ def make_labour_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
                 "gap_pct": safe_pct_gap(sim_hh, obs),
             })
     return pd.DataFrame(rows).sort_values(["year", "labour_version"])
+
+def make_income_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for version in ["before_transfers", "after_transfers"]:
+        col = f"income_{version}_eligible"
+        for year, g in df.groupby("year"):
+            eligible_w = (
+                g["baseline_main_included"].fillna(False)
+                & g["rmi_amount_rule_available"].eq(1)
+                & g["rmi_age_eligible"].eq(1)
+                & g["rmi_claimant_proxy_eligible"].eq(1)
+                & g[col].eq(1)
+            )
+            sim_hh = g.loc[eligible_w, "weight_hh"].sum()
+            titulares_values = g[["nuts_code", "titulares"]].drop_duplicates()
+            obs = float(titulares_values["titulares"].sum())
+            rows.append({
+                "income_version": version,
+                "year": year,
+                "simulated_households": sim_hh,
+                "observed_titulares": obs,
+                "gap_pct": safe_pct_gap(sim_hh, obs),
+            })
+    return pd.DataFrame(rows).sort_values(["year", "income_version"])

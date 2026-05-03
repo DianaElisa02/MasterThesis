@@ -95,19 +95,90 @@ def compute_income_gap(df: pd.DataFrame) -> pd.DataFrame:
         & out["rmi_claimant_proxy_eligible"].eq(1)
     )
 
-    out["rmi_income_eligible"] = np.where(
-        claimant_unit_ok & resources.notna() & guarantee.notna(),
-        (resources < guarantee).astype(float),
-        np.nan,
-    )
-
-    out["rmi_income_gap_entitlement_monthly"] = np.where(
+    raw_gap = np.where(
         claimant_unit_ok & resources.notna() & guarantee.notna(),
         np.maximum(guarantee - resources, 0),
         np.nan,
     )
 
+    min_floor = out["nuts_code"].map(REGIONAL_MIN_ENTITLEMENT).fillna(0.0)
+    out["rmi_regional_min_floor"] = min_floor
+
+    # A household with a gap below the regional minimum would receive nothing
+    gap_above_floor = pd.Series(raw_gap, index=out.index) >= min_floor
+
+    out["rmi_income_eligible"] = np.where(
+        claimant_unit_ok & resources.notna() & guarantee.notna(),
+        (
+            (resources < guarantee) & gap_above_floor
+        ).astype(float),
+        np.nan,
+    )
+
+    out["rmi_income_gap_entitlement_monthly"] = np.where(
+        out["rmi_income_eligible"].eq(1),
+        raw_gap,
+        np.nan,
+    )
+
+    out["rmi_below_min_floor"] = np.where(
+        claimant_unit_ok & resources.notna() & guarantee.notna()
+        & (pd.Series(raw_gap, index=out.index) > 0)
+        & ~gap_above_floor,
+        1.0,
+        0.0,
+    )
+
     return out
+
+def compute_income_concept_versions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Two income concept versions computed as sensitivity columns.
+    NOT part of main eligibility — applied on top of rmi_sim_eligible.
+
+    All versions use the same regional minimum floor logic as compute_income_gap.
+
+    before_transfers : income before transfers / 12 (main concept)
+                       reflects resources the household generates independently
+                       of the state — closest to the legal income test intent
+    after_transfers  : income after transfers / 12
+                       includes all social transfers — more restrictive upper
+                       bound since households receiving other benefits appear
+                       richer and fewer pass the income test
+    """
+    out = df.copy()
+
+    guarantee = pd.to_numeric(out["rmi_guaranteed_amount_monthly"], errors="coerce")
+    min_floor = out["nuts_code"].map(REGIONAL_MIN_ENTITLEMENT).fillna(0.0)
+
+    claimant_unit_ok = (
+        out["rmi_age_eligible"].eq(1)
+        & out["rmi_claimant_proxy_eligible"].eq(1)
+    )
+
+    for version, col in [
+        ("before_transfers", "resources_proxy_baseline_monthly"),
+        ("after_transfers",  "income_after_transfers_monthly"),
+    ]:
+        resources = pd.to_numeric(out[col], errors="coerce")
+
+        raw_gap = np.where(
+            claimant_unit_ok & resources.notna() & guarantee.notna(),
+            np.maximum(guarantee - resources, 0),
+            np.nan,
+        )
+
+        gap_series = pd.Series(raw_gap, index=out.index)
+        gap_above_floor = gap_series >= min_floor
+
+        out[f"income_{version}_eligible"] = np.where(
+            claimant_unit_ok & resources.notna() & guarantee.notna(),
+            ((resources < guarantee) & gap_above_floor).astype(float),
+            np.nan,
+        )
+
+    return out
+    
 
 def finalize_entitlement(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -158,44 +229,3 @@ def finalize_entitlement(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-
-def apply_fixed_non_takeup_calibration(
-    df: pd.DataFrame,
-    high_ntu: float = HIGH_NTU_DEFAULT,
-    medium_ntu: float = MEDIUM_NTU_DEFAULT,
-) -> pd.DataFrame:
-    out = df.copy()
-
-    invalid_rates = [r for r in [high_ntu, medium_ntu] if not (0.0 <= r <= 1.0)]
-    if invalid_rates:
-        raise ValueError(
-            f"All non-take-up rates must be between 0 and 1. "
-            f"Got high_ntu={high_ntu}, medium_ntu={medium_ntu}"
-        )
-
-    out["fixed_non_take_up_rate"] = np.select(
-        [
-            out["baseline_non_takeup_group"].eq("high"),
-            out["baseline_non_takeup_group"].eq("medium"),
-        ],
-        [high_ntu, medium_ntu],
-        default=0.0,
-    )
-
-    out["fixed_take_up_rate"] = 1.0 - out["fixed_non_take_up_rate"]
-
-    out["rmi_effective_recipient_weight"] = np.where(
-        out["rmi_positive_entitlement"].eq(1),
-        out["weight_hh"] * out["fixed_take_up_rate"],
-        0.0,
-    )
-
-    out["rmi_positive_entitlement_calibrated"] = np.where(
-        out["rmi_positive_entitlement"].eq(1), 1.0, 0.0
-    )
-
-    out["non_takeup_calibration_group"] = out["baseline_non_takeup_group"].fillna(
-        "none"
-    )
-
-    return out
