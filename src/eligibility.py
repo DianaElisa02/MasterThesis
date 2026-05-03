@@ -422,8 +422,8 @@ def compute_labour_gate_versions(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
 
-    rp1_unemployed = out["rp1_activity_status_detail"].eq("unemployed")
-    rp2_unemployed = out["rp2_activity_status_detail"].eq("unemployed")
+    rp1_unemployed = pd.to_numeric(out["rp1_activity_status_detail"], errors="raise").eq(5)
+    rp2_unemployed = pd.to_numeric(out["rp2_activity_status_detail"], errors="raise").eq(5)
 
     rp1_searching = out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
     rp2_searching = out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()

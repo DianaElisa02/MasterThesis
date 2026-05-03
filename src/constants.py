@@ -69,6 +69,8 @@ PERSON_HOUSEHOLD_COLUMNS = [
     "any_responsible_person_active_search",
     "poverty",
     "matdep",
+    "rp1_activity_status_detail",
+    "rp2_activity_status_detail",
 ]
 
 HOUSEHOLD_REQUIRED_COLUMNS = [
@@ -107,6 +109,8 @@ HOUSEHOLD_REQUIRED_COLUMNS = [
     "has_complete_age_composition",
     "labour_income_observed",
     "all_unemployed_searching",
+    "rp1_activity_status_detail",
+    "rp2_activity_status_detail",
 ]
 
 MAX_REASONABLE_AGE = 125

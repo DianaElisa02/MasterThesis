@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from turtle import pd
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_gap,
@@ -72,6 +73,25 @@ def main() -> None:
     sim = finalize_entitlement(sim)
     sim = compute_wealth_versions(sim)
     sim = compute_labour_gate_versions(sim)
+
+    print("\nRP activity status value counts:")
+    print(sim["rp1_activity_status_detail"].value_counts(dropna=False).head(10))
+
+    print("\nRP active job search value counts:")
+    print(sim["rp1_active_job_search"].value_counts(dropna=False))
+
+    print("\nresponsible_person_proxy_available value counts:")
+    print(sim["responsible_person_proxy_available"].value_counts(dropna=False))
+
+    print("\nlabour_universal value counts:")
+    print(sim["labour_universal"].value_counts(dropna=False))
+
+    rp1_unemployed = sim["rp1_activity_status_detail"].eq("unemployed")
+    print("\nrp1_unemployed count:", rp1_unemployed.sum())
+    rp2_unemployed = sim["rp2_activity_status_detail"].eq("unemployed")
+    print("rp2_unemployed count:", rp2_unemployed.sum())
+
+
     sim = reorder_columns(sim)
 
 
@@ -80,7 +100,6 @@ def main() -> None:
     region_diag = make_region_diagnostic_table(sim)
     wealth_sensitivity = make_wealth_sensitivity_table(sim)
     labour_sensitivity = make_labour_sensitivity_table(sim)
-
 
     print("\n" + "=" * 80)
     print("PRE-POLICY RMI SIMULATION — RAW SIMULATED COUNTS")
@@ -143,6 +162,7 @@ def main() -> None:
     ascending=True,
     digits=3,
     )
+
 
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)

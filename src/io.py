@@ -67,7 +67,9 @@ def prepare_households(
     if missing:
         raise KeyError(f"Missing columns in household input: {missing}")
 
+    string_cols = {"rp1_activity_status_detail", "rp2_activity_status_detail"}
     for c in HOUSEHOLD_REQUIRED_COLUMNS:
+     if c not in string_cols:
         out[c] = pd.to_numeric(out[c], errors="coerce")
 
     out["threshold_resources_monthly"] = out["resources_proxy_baseline_monthly"]
