@@ -3,8 +3,26 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-HIGH_NTU_DEFAULT = 0.70
-MEDIUM_NTU_DEFAULT = 0.30
+REGIONAL_MIN_ENTITLEMENT: dict[str, float] = {
+    "ES11": 53.78,   # Galicia — Informe RMI 2017, Cuadro 2
+    "ES12": 44.30,   # Asturias — Informe RMI 2017, Cuadro 2
+    "ES13": 30.32,   # Cantabria — Informe RMI 2017, Cuadro 2
+    "ES21": 0.00,    # Basque Country — no minimum listed
+    "ES22": 0.00,    # Navarra — no minimum listed
+    "ES23": 0.00,    # La Rioja — no minimum listed
+    "ES24": 0.00,    # Aragon — no minimum listed
+    "ES30": 0.00,    # Madrid — no minimum listed
+    "ES41": 0.00,    # Castilla y León — no minimum listed
+    "ES42": 300.00,  # Castilla-La Mancha — Informe RMI 2017, Cuadro 2
+    "ES43": 100.00,  # Extremadura — Informe RMI 2017, Cuadro 2
+    "ES51": 60.93,   # Catalonia — Informe RMI 2017, Cuadro 2
+    "ES52": 30.00,   # Valencia — Informe RMI 2017, Cuadro 2
+    "ES53": 108.00,  # Balearic Islands — Informe RMI 2017, Cuadro 2
+    "ES61": 98.28,   # Andalusia — Informe RMI 2017, Cuadro 2
+    "ES62": 0.00,    # Murcia — no minimum listed
+    "ES64": 0.00,    # Melilla — no minimum listed
+    "ES70": 127.09,  # Canary Islands — Informe RMI 2017, Cuadro 2
+}
 
 
 def assign_guaranteed_amount(df: pd.DataFrame) -> pd.DataFrame:
