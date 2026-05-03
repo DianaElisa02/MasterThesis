@@ -403,3 +403,21 @@ def make_income_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
                 "gap_pct": safe_pct_gap(sim_hh, obs),
             })
     return pd.DataFrame(rows).sort_values(["year", "income_version"])
+
+def make_household_type_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for version in ["no_restriction", "proxy_restricted", "strict_household"]:
+        col = f"hhtype_{version}"
+        for year, g in df.groupby("year"):
+            eligible_w = g["rmi_sim_eligible"].eq(1) & g[col].eq(1)
+            sim_hh = g.loc[eligible_w, "weight_hh"].sum()
+            titulares_values = g[["nuts_code", "titulares"]].drop_duplicates()
+            obs = float(titulares_values["titulares"].sum())
+            rows.append({
+                "hhtype_version": version,
+                "year": year,
+                "simulated_households": sim_hh,
+                "observed_titulares": obs,
+                "gap_pct": safe_pct_gap(sim_hh, obs),
+            })
+    return pd.DataFrame(rows).sort_values(["year", "hhtype_version"])

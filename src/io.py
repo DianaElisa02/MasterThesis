@@ -15,19 +15,21 @@ def load_inputs(
     rules_path: Path,
     schedule_path: Path,
     coverage_path: Path,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    hh = pd.read_parquet(hh_path)
-    rules = pd.read_parquet(rules_path)
+    eligibility_path: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    hh       = pd.read_parquet(hh_path)
+    rules    = pd.read_parquet(rules_path)
     schedule = pd.read_parquet(schedule_path)
     coverage = pd.read_parquet(coverage_path)
+    eligibility = pd.read_parquet(eligibility_path)
 
     logger.info("Household rows: %s", len(hh))
     logger.info("Baseline rules rows: %s", len(rules))
     logger.info("Baseline schedule rows: %s", len(schedule))
     logger.info("Coverage rows: %s", len(coverage))
+    logger.info("Eligibility rows: %s", len(eligibility))
 
-    return hh, rules, schedule, coverage
-
+    return hh, rules, schedule, coverage, eligibility
 
 def prepare_coverage(coverage: pd.DataFrame) -> pd.DataFrame:
     keep = [
@@ -81,8 +83,11 @@ def prepare_households(
     logger.info("Prepared pre-period baseline household rows: %s", len(out))
     return out
 
-
-def prepare_rules(rules: pd.DataFrame, years: list[int]) -> pd.DataFrame:
+def prepare_rules(
+    rules: pd.DataFrame,
+    eligibility: pd.DataFrame,
+    years: list[int],
+) -> pd.DataFrame:
     rules = rules.loc[rules["year"].isin(years)].copy()
 
     keep = [
@@ -125,6 +130,13 @@ def prepare_rules(rules: pd.DataFrame, years: list[int]) -> pd.DataFrame:
     out["baseline_amount_topup_factor"] = pd.to_numeric(
         out["baseline_amount_topup_factor"], errors="coerce"
     )
+    
+    legal_unit = (
+        eligibility[["nuts_code", "year", "legal_unit_type"]]
+        .drop_duplicates()
+    )
+    out = out.merge(legal_unit, on=["nuts_code", "year"], how="left", validate="1:1")
+
     return out
 
 

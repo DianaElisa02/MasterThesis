@@ -186,6 +186,17 @@ def build_baseline_schedule(rmi_amounts_full: pd.DataFrame) -> pd.DataFrame:
 
     return BaselineScheduleSchema.validate(schedule, lazy=True)
 
+def build_rmi_eligibility(region_lookup: pd.DataFrame) -> pd.DataFrame:
+    eligibility = read_policy_csv("rmi_eligibility_2017")
+    eligibility = add_region_lookup(eligibility, region_lookup)
+
+    return expand_years(
+        eligibility,
+        years=ANALYSIS_YEARS,
+        source_year=2017,
+        assumption_note="2017 eligibility rules carried forward to 2018-2019",
+    )
+
 
 def build_baseline_amount_summary(rmi_amounts_full: pd.DataFrame) -> pd.DataFrame:
     amount_summary = rmi_amounts_full.groupby(
@@ -251,6 +262,7 @@ def save_policy_outputs(
     baseline_rules: pd.DataFrame,
     baseline_schedule: pd.DataFrame,
     rmi_coverage: pd.DataFrame,
+    rmi_eligibility: pd.DataFrame,
 ) -> None:
     POLICY_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -266,6 +278,11 @@ def save_policy_outputs(
 
     rmi_coverage.to_parquet(
         POLICY_DIR / "rmi_coverage_reference.parquet",
+        index=False,
+    )
+
+    rmi_eligibility.to_parquet(
+        POLICY_DIR / "rmi_eligibility_full.parquet",
         index=False,
     )
 
@@ -312,6 +329,7 @@ def main() -> None:
 
     rmi_amounts_full = build_rmi_amounts(region_lookup)
     rmi_coverage = build_rmi_coverage(region_lookup)
+    rmi_eligibility = build_rmi_eligibility(region_lookup)
 
     baseline_schedule = build_baseline_schedule(rmi_amounts_full)
     baseline_rules = build_baseline_rules(
@@ -331,6 +349,8 @@ def main() -> None:
         baseline_rules=baseline_rules,
         baseline_schedule=baseline_schedule,
         rmi_coverage=rmi_coverage,
+        rmi_eligibility=rmi_eligibility,
+        
     )
 
     logger.info("Saved policy outputs in: %s", POLICY_DIR)

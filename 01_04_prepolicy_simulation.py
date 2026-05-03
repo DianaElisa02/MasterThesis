@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pandas as pd
+
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_gap,
@@ -14,6 +16,7 @@ from src.eligibility import (
     apply_claimant_proxy_rule,
     compute_wealth_versions,
     compute_labour_gate_versions,
+    compute_household_type_versions,
 )
 from src.io import (
     load_inputs,
@@ -32,6 +35,7 @@ from src.summaries import (
     make_wealth_sensitivity_table,
     make_labour_sensitivity_table,
     make_income_sensitivity_table,
+    make_household_type_sensitivity_table,
 )
 
 BASE_PATH = Path(".").resolve()
@@ -40,6 +44,7 @@ INPUT_HH = BASE_PATH / "ecv_household_clean.parquet"
 INPUT_RULES = BASE_PATH / "policy_db" / "rmi_baseline_rules.parquet"
 INPUT_SCHEDULE = BASE_PATH / "policy_db" / "rmi_baseline_schedule.parquet"
 INPUT_COVERAGE = BASE_PATH / "policy_db" / "rmi_coverage_reference.parquet"
+INPUT_ELIGIBILITY = BASE_PATH / "policy_db" / "rmi_eligibility_full.parquet"
 
 PRE_YEARS = [2017, 2018, 2019]
 RUN_TAG = f"pre_{PRE_YEARS[0]}_{PRE_YEARS[-1]}"
@@ -52,6 +57,7 @@ OUTPUT_REGION_DIAG = BASE_PATH / f"rmi_baseline_{RUN_TAG}_region_diagnostic.parq
 OUTPUT_WEALTH   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_wealth_sensitivity.parquet"
 OUTPUT_LABOUR   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_labour_sensitivity.parquet"
 OUTPUT_INCOME = BASE_PATH / f"rmi_baseline_{RUN_TAG}_income_sensitivity.parquet"
+OUTPUT_HHTYPE = BASE_PATH / f"rmi_baseline_{RUN_TAG}_household_type_sensitivity.parquet"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
@@ -60,12 +66,12 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    hh, rules, schedule, coverage = load_inputs(
-        INPUT_HH, INPUT_RULES, INPUT_SCHEDULE, INPUT_COVERAGE
-    )
+    hh, rules, schedule, coverage, eligibility = load_inputs(
+    INPUT_HH, INPUT_RULES, INPUT_SCHEDULE, INPUT_COVERAGE, INPUT_ELIGIBILITY
+)
 
     hh = prepare_households(hh, years=PRE_YEARS)
-    rules = prepare_rules(rules, years=PRE_YEARS)
+    rules = prepare_rules(rules, eligibility, years=PRE_YEARS)
     schedule = prepare_schedule(schedule, years=PRE_YEARS)
     coverage = prepare_coverage(coverage)
     sim = merge_inputs(hh, rules, schedule, coverage)
@@ -77,25 +83,26 @@ def main() -> None:
     sim = compute_wealth_versions(sim)
     sim = compute_labour_gate_versions(sim)
     sim = compute_income_concept_versions(sim)
+    sim = compute_household_type_versions(sim)
 
+    sim = compute_household_type_versions(sim)
 
-    print(sim["rp1_activity_status_detail"].value_counts(dropna=False).head(10))
-
-    print("\nRP active job search value counts:")
-    print(sim["rp1_active_job_search"].value_counts(dropna=False))
-
-    print("\nresponsible_person_proxy_available value counts:")
-    print(sim["responsible_person_proxy_available"].value_counts(dropna=False))
-
-    print(sim["labour_universal"].value_counts(dropna=False))
-
-    rp1_unemployed = sim["rp1_activity_status_detail"].eq("unemployed")
-    print("\nrp1_unemployed count:", rp1_unemployed.sum())
-    rp2_unemployed = sim["rp2_activity_status_detail"].eq("unemployed")
-    print("rp2_unemployed count:", rp2_unemployed.sum())
-
+# --- Temporary diagnostic for household type versions ---
+    print("\nn_adults_18plus sample values:")
+    print(pd.to_numeric(sim["n_adults_18plus"], errors="coerce").describe())
+    print("\nn_working_18_64 sample values:")
+    print(pd.to_numeric(sim["n_working_18_64"], errors="coerce").describe())
+    print("\nHouseholds with 3+ adults:")
+    n_adults = pd.to_numeric(sim["n_adults_18plus"], errors="coerce").fillna(0)
+    print((n_adults >= 3).value_counts())
+    print("\nHouseholds with 2+ working among 3+ adult households:")
+    n_working = pd.to_numeric(sim["n_working_18_64"], errors="coerce").fillna(0)
+    print(n_working[n_adults >= 3].describe())
+# --- End diagnostic ---
 
     sim = reorder_columns(sim)
+
+
 
 
     year_summary = make_year_summary(sim)
@@ -104,6 +111,7 @@ def main() -> None:
     wealth_sensitivity = make_wealth_sensitivity_table(sim)
     labour_sensitivity = make_labour_sensitivity_table(sim)
     income_sensitivity = make_income_sensitivity_table(sim)
+    hhtype_sensitivity = make_household_type_sensitivity_table(sim)
 
     print("\n" + "=" * 80)
     print("PRE-POLICY RMI SIMULATION — RAW SIMULATED COUNTS")
@@ -179,6 +187,18 @@ def main() -> None:
     digits=3,
     )
 
+    print("\n" + "=" * 70)
+    print("HOUSEHOLD TYPE SENSITIVITY")
+    print("=" * 70)
+    print_compact_table(
+    hhtype_sensitivity,
+    title="Simulated households by household type version and year",
+    columns=["hhtype_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    sort_by=["year", "hhtype_version"],
+    ascending=True,
+    digits=3,
+    )
+
 
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)
@@ -188,6 +208,7 @@ def main() -> None:
     wealth_sensitivity.to_parquet(OUTPUT_WEALTH, index=False)
     labour_sensitivity.to_parquet(OUTPUT_LABOUR, index=False)
     income_sensitivity.to_parquet(OUTPUT_INCOME, index=False)
+    hhtype_sensitivity.to_parquet(OUTPUT_HHTYPE, index=False)
     logger.info("Saved household simulation file to %s", OUTPUT_HH)
     logger.info("Saved CSV copy to %s", OUTPUT_CSV)
     logger.info("Saved year summary to %s", OUTPUT_YEAR)
@@ -196,6 +217,7 @@ def main() -> None:
     logger.info("Saved wealth sensitivity to %s", OUTPUT_WEALTH)
     logger.info("Saved labour sensitivity to %s", OUTPUT_LABOUR)
     logger.info("Saved income sensitivity to %s", OUTPUT_INCOME)
+    logger.info("Saved household type sensitivity to %s", OUTPUT_HHTYPE)
 
 if __name__ == "__main__":
     main()

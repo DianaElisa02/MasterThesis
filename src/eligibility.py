@@ -441,3 +441,42 @@ def compute_labour_gate_versions(df: pd.DataFrame) -> pd.DataFrame:
     out["labour_universal"] = gate_result
 
     return out
+
+def compute_household_type_versions(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    out["hhtype_no_restriction"] = 1.0
+
+    n_adults = pd.to_numeric(out["n_adults_18plus"], errors="coerce").fillna(0)
+    n_working = pd.to_numeric(out["n_working_18_64"], errors="coerce").fillna(0)
+    n_unemployed = pd.to_numeric(out["n_unemployed_18_64"], errors="coerce").fillna(0)
+
+    multi_unit_proxy = (
+        (n_adults >= 3) &
+        (
+            (n_working >= 2) |
+            (n_unemployed >= 2)
+        )
+    )
+
+    is_proxy_region = out["legal_unit_type"].fillna("").str.endswith("_proxy")
+
+    out["hhtype_proxy_restricted"] = np.where(
+        is_proxy_region,
+        (~multi_unit_proxy).astype(float),
+        1.0,
+    )
+
+    is_simple = (
+        out["single_adult"].eq(1) |
+        out["single_parent"].eq(1) |
+        out["two_adults"].eq(1)
+    )
+
+    out["hhtype_strict_household"] = np.where(
+        is_simple.notna(),
+        is_simple.astype(float),
+        np.nan,
+    )
+
+    return out
