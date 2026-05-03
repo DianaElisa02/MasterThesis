@@ -368,3 +368,76 @@ def add_percentile_filter(df: pd.DataFrame, quantile: float) -> pd.DataFrame:
 
     out["percentile_rule"] = f"bottom_{int(quantile * 100)}pct"
     return out
+
+
+def compute_wealth_versions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Three wealth test versions computed as sensitivity columns.
+    NOT part of main eligibility — applied on top of rmi_sim_eligible.
+
+    no_test : all households pass
+    strict  : fails if any capital income, rental income, or wealth tax paid
+    soft    : fails only if capital income > 500 EUR/year
+    """
+    out = df.copy()
+
+    out["wealth_no_test"] = 1.0
+
+    out["wealth_strict"] = np.where(
+        out["any_capital_income"].eq(1)
+        | out["any_rental_income"].eq(1)
+        | out["any_wealth_tax_paid"].eq(1),
+        0.0,
+        1.0,
+    )
+
+    capital = pd.to_numeric(out["capital_income_annual"], errors="coerce")
+    out["wealth_soft"] = np.where(
+        capital.gt(500)
+        | out["any_rental_income"].eq(1)
+        | out["any_wealth_tax_paid"].eq(1),
+        0.0,
+        1.0,
+    )
+
+    return out
+
+
+def compute_labour_gate_versions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Three labour gate versions computed as sensitivity columns.
+    NOT part of main eligibility — applied on top of rmi_sim_eligible.
+
+    Versions derived from baseline_conditionality_profile:
+    no_gate     : all households pass
+    strict_only : gate applied only where conditionality_profile == 'strict'
+                  (Andalusia, Canary Islands, Castilla-La Mancha), which
+                  explicitly required unemployed registration as a precondition
+                  per Informe RMI 2017, Cuadro 3-2.
+    universal   : gate applied to all regions
+
+    Gate condition: at least one responsible person is unemployed AND searching.
+    Missing active_job_search is treated as searching — exclusion requires
+    positive evidence of non-search (charitable default).
+    """
+    out = df.copy()
+
+    rp1_unemployed = out["rp1_activity_status_detail"].eq("unemployed")
+    rp2_unemployed = out["rp2_activity_status_detail"].eq("unemployed")
+
+    rp1_searching = out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
+    rp2_searching = out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()
+
+    rp_observed = out["responsible_person_proxy_available"].eq(1)
+
+    gate_passes = (rp1_unemployed & rp1_searching) | (rp2_unemployed & rp2_searching)
+
+    gate_result = np.where(rp_observed, gate_passes.astype(float), 1.0)
+
+    is_strict = out["baseline_conditionality_profile"].eq("strict")
+
+    out["labour_no_gate"] = 1.0
+    out["labour_strict_only"] = np.where(is_strict, gate_result, 1.0)
+    out["labour_universal"] = gate_result
+
+    return out

@@ -75,15 +75,6 @@ def compute_income_gap(df: pd.DataFrame) -> pd.DataFrame:
     claimant_unit_ok = (
         out["rmi_age_eligible"].eq(1)
         & out["rmi_claimant_proxy_eligible"].eq(1)
-        & out["rmi_wealth_eligible"].eq(1)
-        & out["rmi_hhtype_eligible"].eq(1)
-        & out["rmi_threeplus_adults_allowed"].eq(1)
-        & out["rmi_labour_eligible"].eq(1)
-        & out["rmi_insertion_rule_eligible"].eq(1)
-    )
-
-    out["rmi_income_test_observed"] = np.where(
-        claimant_unit_ok & resources.notna() & guarantee.notna(), 1.0, 0.0
     )
 
     out["rmi_income_eligible"] = np.where(
@@ -100,25 +91,15 @@ def compute_income_gap(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-
 def finalize_entitlement(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-
-    active_inclusion_condition = out["active_inclusion_ok"].eq(1)
 
     conditions = (
         out["baseline_main_included"].fillna(False)
         & out["rmi_amount_rule_available"].eq(1)
         & out["rmi_age_eligible"].eq(1)
         & out["rmi_claimant_proxy_eligible"].eq(1)
-        & out["rmi_wealth_eligible"].eq(1)
-        & out["rmi_hhtype_eligible"].eq(1)
-        & out["rmi_threeplus_adults_allowed"].eq(1)
-        & out["rmi_labour_eligible"].eq(1)
         & out["rmi_income_eligible"].eq(1)
-        & out["passes_percentile_filter"].eq(1)
-        & out["rmi_insertion_rule_eligible"].eq(1)
-        & active_inclusion_condition
     )
 
     out["rmi_sim_eligible"] = np.where(conditions, 1.0, 0.0)
@@ -139,20 +120,8 @@ def finalize_entitlement(df: pd.DataFrame) -> pd.DataFrame:
             out["rmi_age_eligible"].eq(0),
             out["rmi_claimant_proxy_eligible"].isna(),
             out["rmi_claimant_proxy_eligible"].eq(0),
-            out["rmi_wealth_eligible"].isna(),
-            out["rmi_wealth_eligible"].eq(0),
-            out["rmi_hhtype_eligible"].isna(),
-            out["rmi_hhtype_eligible"].eq(0),
-            out["rmi_threeplus_adults_allowed"].isna(),
-            out["rmi_threeplus_adults_allowed"].eq(0),
-            out["rmi_labour_eligible"].isna(),
-            out["rmi_labour_rule_source"].eq("fails_labour_income_rule"),
-            out["rmi_labour_rule_source"].eq("fails_labour_context_rule"),
             out["rmi_income_eligible"].isna(),
             out["rmi_income_eligible"].eq(0),
-            out["passes_percentile_filter"].isna(),
-            out["passes_percentile_filter"].eq(0),
-            out["active_inclusion_ok"].eq(0),
             out["rmi_sim_eligible"].eq(1),
         ],
         [
@@ -162,20 +131,8 @@ def finalize_entitlement(df: pd.DataFrame) -> pd.DataFrame:
             "fails_claimant_age_rule",
             "claimant_proxy_not_observable",
             "fails_claimant_proxy_rule",
-            "wealth_rule_not_observable",
-            "fails_strict_wealth_rule",
-            "hh_type_rule_not_observable",
-            "fails_household_type_rule",
-            "threeplus_rule_not_observable",
-            "fails_threeplus_adults_rule",
-            "labour_rule_not_observable",
-            "fails_labour_income_rule",
-            "fails_labour_context_rule",
             "missing_income_or_amount",
             "income_at_or_above_threshold",
-            "percentile_filter_missing",
-            "fails_percentile_filter",
-            "fails_active_inclusion_proxy",
             "eligible",
         ],
         default="other",

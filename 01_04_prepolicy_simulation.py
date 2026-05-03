@@ -11,7 +11,6 @@ from src.amounts import (
 from src.eligibility import (
     apply_age_rule,
     apply_claimant_proxy_rule,
-    apply_household_type_gate,
 )
 from src.io import (
     load_inputs,
@@ -65,7 +64,6 @@ def main() -> None:
     sim = apply_age_rule(sim)
     sim = apply_claimant_proxy_rule(sim)
     sim = assign_guaranteed_amount(sim)
-    sim = apply_household_type_gate(sim)
     sim = compute_income_gap(sim)
     sim = finalize_entitlement(sim)
 

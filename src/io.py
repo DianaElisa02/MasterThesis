@@ -180,7 +180,6 @@ def merge_inputs(
 
     return out
 
-
 def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
     preferred = [
         "household_id",
@@ -192,16 +191,10 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "weight_hh",
         "household_size",
         "hh_size_rule",
-        "pfilter_resources_monthly",
         "threshold_resources_monthly",
-        "percentile_cutoff_monthly",
-        "passes_percentile_filter",
         "baseline_main_included",
         "baseline_amount_method",
         "baseline_age_threshold",
-        "baseline_apply_active_inclusion_gate",
-        "baseline_relax_labour_gate",
-        "baseline_non_takeup_group",
         "baseline_conditionality_profile",
         "baseline_scheme_structure",
         "rmi_guaranteed_amount_monthly",
@@ -210,26 +203,18 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "rmi_age_rule_source",
         "rmi_claimant_proxy_eligible",
         "rmi_claimant_proxy_source",
-        "rmi_wealth_eligible",
-        "rmi_hhtype_eligible",
-        "rmi_threeplus_adults_allowed",
-        "labour_income_hh_monthly",
-        "any_positive_labour_income",
-        "rmi_labour_income_eligible",
-        "rmi_labour_context_eligible",
-        "rmi_labour_eligible",
-        "rmi_labour_rule_source",
-        "active_inclusion_gate_applied",
-        "active_inclusion_ok",
         "rmi_income_eligible",
         "rmi_income_gap_entitlement_monthly",
         "rmi_sim_eligible",
         "rmi_simulated_benefit_monthly",
         "rmi_positive_entitlement",
-        "fixed_non_take_up_rate",
-        "fixed_take_up_rate",
-        "rmi_effective_recipient_weight",
         "rmi_exclusion_reason",
+        "wealth_no_test",
+        "wealth_strict",
+        "wealth_soft",
+        "labour_no_gate",
+        "labour_strict_only",
+        "labour_universal",
     ]
     existing = [c for c in preferred if c in df.columns]
     remaining = [c for c in df.columns if c not in existing]

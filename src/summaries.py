@@ -192,14 +192,8 @@ def make_region_diagnostic_table(df: pd.DataFrame) -> pd.DataFrame:
                 "share_income_eligible": weighted_share(
                     g["rmi_income_eligible"], g["weight_hh"], 1.0
                 ),
-                "share_pass_pfilter": weighted_share(
-                    g["passes_percentile_filter"], g["weight_hh"], 1.0
-                ),
                 "share_labour_eligible": weighted_share(
                     g["rmi_labour_eligible"], g["weight_hh"], 1.0
-                ),
-                "share_active_inclusion_ok": weighted_share(
-                    g["active_inclusion_ok"], g["weight_hh"], 1.0
                 ),
             }
         )
@@ -348,3 +342,40 @@ def debug_income_distribution(sim: pd.DataFrame) -> None:
         )
 
     print(pd.DataFrame(rows).sort_values("year").to_string(index=False))
+
+def make_wealth_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for version in ["no_test", "strict", "soft"]:
+        col = f"wealth_{version}"
+        for year, g in df.groupby("year"):
+            eligible_w = g["rmi_sim_eligible"].eq(1) & g[col].eq(1)
+            sim_hh = g.loc[eligible_w, "weight_hh"].sum()
+            titulares_values = g[["nuts_code", "titulares"]].drop_duplicates()
+            obs = float(titulares_values["titulares"].sum())
+            rows.append({
+                "wealth_version": version,
+                "year": year,
+                "simulated_households": sim_hh,
+                "observed_titulares": obs,
+                "gap_pct": safe_pct_gap(sim_hh, obs),
+            })
+    return pd.DataFrame(rows).sort_values(["year", "wealth_version"])
+
+
+def make_labour_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for version in ["no_gate", "strict_only", "universal"]:
+        col = f"labour_{version}"
+        for year, g in df.groupby("year"):
+            eligible_w = g["rmi_sim_eligible"].eq(1) & g[col].eq(1)
+            sim_hh = g.loc[eligible_w, "weight_hh"].sum()
+            titulares_values = g[["nuts_code", "titulares"]].drop_duplicates()
+            obs = float(titulares_values["titulares"].sum())
+            rows.append({
+                "labour_version": version,
+                "year": year,
+                "simulated_households": sim_hh,
+                "observed_titulares": obs,
+                "gap_pct": safe_pct_gap(sim_hh, obs),
+            })
+    return pd.DataFrame(rows).sort_values(["year", "labour_version"])
