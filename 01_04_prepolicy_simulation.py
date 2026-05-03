@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_gap,
@@ -11,6 +10,8 @@ from src.amounts import (
 from src.eligibility import (
     apply_age_rule,
     apply_claimant_proxy_rule,
+    compute_wealth_versions,
+    compute_labour_gate_versions,
 )
 from src.io import (
     load_inputs,
@@ -19,12 +20,15 @@ from src.io import (
     prepare_households,
     prepare_rules,
     prepare_schedule,
+    reorder_columns,
 )
 from src.stats import print_compact_table
 from src.summaries import (
     make_region_diagnostic_table,
     make_region_summary,
     make_year_summary,
+    make_wealth_sensitivity_table,
+    make_labour_sensitivity_table,
 )
 
 BASE_PATH = Path(".").resolve()
@@ -66,27 +70,34 @@ def main() -> None:
     sim = assign_guaranteed_amount(sim)
     sim = compute_income_gap(sim)
     sim = finalize_entitlement(sim)
+    sim = compute_wealth_versions(sim)
+    sim = compute_labour_gate_versions(sim)
+    sim = reorder_columns(sim)
 
 
     year_summary = make_year_summary(sim)
     region_summary = make_region_summary(sim)
     region_diag = make_region_diagnostic_table(sim)
+    wealth_sensitivity = make_wealth_sensitivity_table(sim)
+    labour_sensitivity = make_labour_sensitivity_table(sim)
 
 
-
+    print("\n" + "=" * 80)
+    print("PRE-POLICY RMI SIMULATION — RAW SIMULATED COUNTS")
+    print("=" * 80)
     print_compact_table(
-        year_summary,
-        title="Year summary: simulated households vs observed titulares",
-        columns=[
-            "year",
-            "weighted_total_simulated_households",
-            "observed_titulares",
-            "absolute_gap_sim_minus_titulares",
-            "pct_gap_vs_titulares",
-        ],
-        sort_by=["year"],
-        ascending=True,
-        digits=3,
+    year_summary,
+    title="Year summary: simulated households vs observed titulares",
+    columns=[
+        "year",
+        "weighted_total_simulated_households",
+        "observed_titulares",
+        "absolute_gap_sim_minus_titulares",
+        "pct_gap_vs_titulares",
+    ],
+    sort_by=["year"],
+    ascending=True,
+    digits=3,
     )
 
     for year in sorted(sim["year"].dropna().unique()):
@@ -101,33 +112,53 @@ def main() -> None:
                 "abs_gap",
                 "pct_gap",
                 "share_simulated",
-                "share_labour_eligible",
+                "share_age_eligible",
+                "share_income_eligible",
             ],
             sort_by=["pct_gap"],
             ascending=False,
             digits=3,
         )
 
-    print("\nActive inclusion proxy by region:")
-    print(
-        sim.groupby("nuts_code")["active_inclusion_ok"]
-        .mean()
-        .sort_values(ascending=False)
-        .to_string()
+    print("\n" + "=" * 70)
+    print("WEALTH TEST SENSITIVITY")
+    print("=" * 70)
+    print_compact_table(
+    wealth_sensitivity,
+    title="Simulated households by wealth version and year",
+    columns=["wealth_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    sort_by=["year", "wealth_version"],
+    ascending=True,
+    digits=3,
     )
 
+    print("\n" + "=" * 70)
+    print("LABOUR GATE SENSITIVITY")
+    print("=" * 70)
+    print_compact_table(
+    labour_sensitivity,
+    title="Simulated households by labour gate version and year",
+    columns=["labour_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    sort_by=["year", "labour_version"],
+    ascending=True,
+    digits=3,
+    )
 
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)
     year_summary.to_parquet(OUTPUT_YEAR, index=False)
     region_summary.to_parquet(OUTPUT_REGION, index=False)
     region_diag.to_parquet(OUTPUT_REGION_DIAG, index=False)
+    wealth_sensitivity.to_parquet(OUTPUT_WEALTH, index=False)
+    labour_sensitivity.to_parquet(OUTPUT_LABOUR, index=False)
 
     logger.info("Saved household simulation file to %s", OUTPUT_HH)
     logger.info("Saved CSV copy to %s", OUTPUT_CSV)
     logger.info("Saved year summary to %s", OUTPUT_YEAR)
     logger.info("Saved region summary to %s", OUTPUT_REGION)
     logger.info("Saved region diagnostic to %s", OUTPUT_REGION_DIAG)
+    logger.info("Saved wealth sensitivity to %s", OUTPUT_WEALTH)
+    logger.info("Saved labour sensitivity to %s", OUTPUT_LABOUR)
 
 
 if __name__ == "__main__":
