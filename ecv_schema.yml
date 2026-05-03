@@ -1,0 +1,80 @@
+td:
+  household_id: { columns: [DB030], type: id }
+  region_code: { columns: [DB040], type: id }
+  weight_hh: { columns: [DB090], type: numeric }
+
+th:
+  household_id: { columns: [HB030], type: id }
+  household_size_raw: { columns: [HB120], type: numeric, nonneg: true }
+  official_hh_type: { columns: [HX060], type: numeric }
+  income_after_transfers:
+    { columns: [HY020], type: numeric, rename: income_after_transfers_annual }
+  income_before_transfers:
+    { columns: [HY022], type: numeric, rename: income_before_transfers_annual }
+  capital_income:
+    {
+      columns: [HY090, HY090N, HY090G],
+      type: numeric,
+      rename: capital_income_annual,
+    }
+  rental_income_gross:
+    { columns: [HY040G], type: numeric, rename: rental_income_gross_annual }
+  mortgage_interest_paid:
+    {
+      columns: [HY100G],
+      type: numeric,
+      nonneg: true,
+      rename: mortgage_interest_paid_annual,
+    }
+  wealth_tax_paid:
+    {
+      columns: [HY120G],
+      type: numeric,
+      nonneg: true,
+      rename: wealth_tax_paid_annual,
+    }
+  tenure_status: { columns: [HH021], type: numeric }
+  consumption_units: { columns: [HX240], type: numeric, nonneg: true }
+  poverty: { columns: [vhPobreza], type: numeric, rename: poverty_raw }
+  matdep: { columns: [vhMATDEP], type: numeric, rename: matdep_raw }
+  responsible_person_1: { columns: [HB080], type: id }
+  responsible_person_2: { columns: [HB090], type: id }
+
+tr:
+  person_id: { columns: [RB030], type: id, required: true }
+  household_id: { columns: [DB030, HB030], type: id }
+  sex: { columns: [RB090], type: numeric }
+  partner_id: { columns: [RB240], type: id }
+  weight_r: { columns: [RB050], type: numeric }
+  age_current: { columns: [RB082], type: numeric, nonneg: true }
+  age_income_ref: { columns: [RB081], type: numeric, nonneg: true }
+  birth_year: { columns: [RB080], type: numeric, nonneg: true }
+
+tp:
+  person_id: { columns: [PB030, RB030], type: id, required: true }
+  weight_p: { columns: [PB040], type: numeric }
+  weight_selected_resp: { columns: [PB060], type: numeric }
+  labour_status_detail: { columns: [PL031, PL032], type: numeric }
+  active_job_search: { columns: [PL020], type: numeric }
+  currently_in_education: { columns: [PE010], type: numeric }
+  nationality: { columns: [PB220A], type: numeric }
+  social_assistance_income_annual:
+    { columns: [HY060N], type: numeric, nonneg: true }
+  employee_cash_income_net:
+    {
+      columns: [PY010N],
+      type: numeric,
+      rename: employee_cash_income_net_annual,
+    }
+  employee_noncash_income_net:
+    {
+      columns: [PY020N],
+      type: numeric,
+      rename: employee_noncash_income_net_annual,
+    }
+  selfemployment_income_net:
+    {
+      columns: [PY050N],
+      type: numeric,
+      rename: selfemployment_income_net_annual,
+    }

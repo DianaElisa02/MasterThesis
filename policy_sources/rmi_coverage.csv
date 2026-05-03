@@ -1,0 +1,58 @@
+region_name_policy,year,population_reference,titulares,total_perceptors,validation_reference,source_year,assumption_no_change,assumption_note
+Andalusia,2017,8379820,29337,102680,administrative_2017,2017,false,Observed administrative counts for 2017
+Aragon,2017,1308750,10466,25183,administrative_2017,2017,false,Observed administrative counts for 2017
+Asturias,2017,1034960,22219,68357,administrative_2017,2017,false,Observed administrative counts for 2017
+Balearic Islands,2017,1115999,7551,13154,administrative_2017,2017,false,Observed administrative counts for 2017
+Canary Islands,2017,2108121,13525,25369,administrative_2017,2017,false,Observed administrative counts for 2017
+Cantabria,2017,580295,6366,14147,administrative_2017,2017,false,Observed administrative counts for 2017
+Castilla-La Mancha,2017,2031479,3152,11146,administrative_2017,2017,false,Observed administrative counts for 2017
+Castilla y Leon,2017,2425801,15502,36643,administrative_2017,2017,false,Observed administrative counts for 2017
+Catalonia,2017,7555830,26311,67985,administrative_2017,2017,false,Observed administrative counts for 2017
+Ceuta,2017,84959,263,967,administrative_2017,2017,false,Observed administrative counts for 2017
+Extremadura,2017,1079920,6316,16853,administrative_2017,2017,false,Observed administrative counts for 2017
+Galicia,2017,2708339,14468,30512,administrative_2017,2017,false,Observed administrative counts for 2017
+Madrid,2017,6507184,35483,117420,administrative_2017,2017,false,Observed administrative counts for 2017
+Melilla,2017,86120,994,3855,administrative_2017,2017,false,Observed administrative counts for 2017
+Murcia,2017,1470273,5421,13649,administrative_2017,2017,false,Observed administrative counts for 2017
+Navarra,2017,643234,15918,35514,administrative_2017,2017,false,Observed administrative counts for 2017
+Basque Country,2017,2194158,76188,142029,administrative_2017,2017,false,Observed administrative counts for 2017
+La Rioja,2017,315381,2424,2424,administrative_2017,2017,false,Observed administrative counts for 2017
+Valencia,2017,4941509,21387,51312,administrative_2017,2017,false,Observed administrative counts for 2017
+Andalusia,2018,,17883,40870,administrative_2018,2018,false,Observed administrative counts for 2018
+Aragon,2018,,9894,23428,administrative_2018,2018,false,Observed administrative counts for 2018
+Asturias,2018,,22305,45511,administrative_2018,2018,false,Observed administrative counts for 2018
+Balearic Islands,2018,,9714,24824,administrative_2018,2018,false,Observed administrative counts for 2018
+Canary Islands,2018,,11592,20792,administrative_2018,2018,false,Observed administrative counts for 2018
+Cantabria,2018,,5365,11286,administrative_2018,2018,false,Observed administrative counts for 2018
+Castilla-La Mancha,2018,,3544,8371,administrative_2018,2018,false,Observed administrative counts for 2018
+Castilla y Leon,2018,,14536,33497,administrative_2018,2018,false,Observed administrative counts for 2018
+Catalonia,2018,,28572,99682,administrative_2018,2018,false,Observed administrative counts for 2018
+Ceuta,2018,,266,951,administrative_2018,2018,false,Observed administrative counts for 2018
+Extremadura,2018,,5982,21099,administrative_2018,2018,false,Observed administrative counts for 2018
+Galicia,2018,,14238,29694,administrative_2018,2018,false,Observed administrative counts for 2018
+Madrid,2018,,33000,106746,administrative_2018,2018,false,Observed administrative counts for 2018
+Melilla,2018,,784,3001,administrative_2018,2018,false,Observed administrative counts for 2018
+Murcia,2018,,5856,14489,administrative_2018,2018,false,Observed administrative counts for 2018
+Navarra,2018,,16078,36303,administrative_2018,2018,false,Observed administrative counts for 2018
+Basque Country,2018,,72341,120606,administrative_2018,2018,false,Observed administrative counts for 2018
+La Rioja,2018,,2941,2941,administrative_2018,2018,false,Observed administrative counts for 2018
+Valencia,2018,,18411,35089,administrative_2018,2018,false,Observed administrative counts for 2018
+Andalusia,2019,,22318,75539,administrative_2019,2019,false,Observed administrative counts for 2019
+Aragon,2019,,9401,31520,administrative_2019,2019,false,Observed administrative counts for 2019
+Asturias,2019,,21884,34821,administrative_2019,2019,false,Observed administrative counts for 2019
+Balearic Islands,2019,,10449,26428,administrative_2019,2019,false,Observed administrative counts for 2019
+Canary Islands,2019,,9973,17317,administrative_2019,2019,false,Observed administrative counts for 2019
+Cantabria,2019,,7052,12849,administrative_2019,2019,false,Observed administrative counts for 2019
+Castilla-La Mancha,2019,,4132,10246,administrative_2019,2019,false,Observed administrative counts for 2019
+Castilla y Leon,2019,,13069,30007,administrative_2019,2019,false,Observed administrative counts for 2019
+Catalonia,2019,,32166,108001,administrative_2019,2019,false,Observed administrative counts for 2019
+Ceuta,2019,,179,640,administrative_2019,2019,false,Observed administrative counts for 2019
+Extremadura,2019,,7991,20136,administrative_2019,2019,false,Observed administrative counts for 2019
+Galicia,2019,,13600,27538,administrative_2019,2019,false,Observed administrative counts for 2019
+Madrid,2019,,28643,91076,administrative_2019,2019,false,Observed administrative counts for 2019
+Melilla,2019,,510,1875,administrative_2019,2019,false,Observed administrative counts for 2019
+Murcia,2019,,6355,15479,administrative_2019,2019,false,Observed administrative counts for 2019
+Navarra,2019,,15712,35899,administrative_2019,2019,false,Observed administrative counts for 2019
+Basque Country,2019,,66508,111318,administrative_2019,2019,false,Observed administrative counts for 2019
+La Rioja,2019,,3070,3070,administrative_2019,2019,false,Observed administrative counts for 2019
+Valencia,2019,,24108,43365,administrative_2019,2019,false,Observed administrative counts for 2019
