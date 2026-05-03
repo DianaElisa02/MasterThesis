@@ -510,16 +510,12 @@ def add_person_flags(person: pd.DataFrame) -> pd.DataFrame:
     p["active_job_search_known"] = active_search.notna().fillna(False)
     p["active_job_search_1"] = active_search.eq(1).fillna(False)
 
-    p["unemployed_search_failure"] = p["is_unemployed_18_64"].fillna(False) & ~p[
-        "active_job_search_1"
-    ].fillna(False)
-
-    # For all_unemployed_searching:
-    # If someone is unemployed and active_search != 1, then the household fails.
-    # Missing active_search counts as not searching, matching your old .eq(1).all() logic.
     p["unemployed_search_failure"] = (
-        p["is_unemployed_18_64"] & ~p["active_job_search_1"]
+    p["is_unemployed_18_64"].fillna(False) &
+    p["active_job_search_known"] &
+    ~p["active_job_search_1"].fillna(False)
     )
+
 
     p["labour_income_person_annual_num"] = labour_income
     p["labour_income_known"] = labour_income.notna()
