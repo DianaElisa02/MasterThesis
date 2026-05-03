@@ -180,23 +180,23 @@ def make_region_diagnostic_table(df: pd.DataFrame) -> pd.DataFrame:
         simulated = g.loc[g["rmi_positive_entitlement"] == 1, "weight_hh"].sum()
 
         rows.append(
-            {
-                "nuts_code": nuts_code,
-                "region_name_policy": region,
-                "year": year,
-                "observed_titulares": titulares,
-                "simulated_households": simulated,
-                "abs_gap": simulated - titulares,
-                "pct_gap": safe_pct_gap(simulated, titulares),
-                "share_simulated": simulated / total_w if total_w > 0 else np.nan,
-                "share_income_eligible": weighted_share(
-                    g["rmi_income_eligible"], g["weight_hh"], 1.0
-                ),
-                "share_labour_eligible": weighted_share(
-                    g["rmi_labour_eligible"], g["weight_hh"], 1.0
-                ),
-            }
-        )
+    {
+        "nuts_code": nuts_code,
+        "region_name_policy": region,
+        "year": year,
+        "observed_titulares": titulares,
+        "simulated_households": simulated,
+        "abs_gap": simulated - titulares,
+        "pct_gap": safe_pct_gap(simulated, titulares),
+        "share_simulated": simulated / total_w if total_w > 0 else np.nan,
+        "share_age_eligible": weighted_share(
+            g["rmi_age_eligible"], g["weight_hh"], 1.0
+        ),
+        "share_income_eligible": weighted_share(
+            g["rmi_income_eligible"], g["weight_hh"], 1.0
+        ),
+    }
+)
 
     return pd.DataFrame(rows).sort_values(["year", "pct_gap"], ascending=[True, False])
 

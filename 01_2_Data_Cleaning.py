@@ -28,7 +28,7 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 HOUSEHOLD_OUTPUT = BASE_PATH / "ecv_household_clean.parquet"
 PERSON_OUTPUT = BASE_PATH / "ecv_person_clean.parquet"
 
-FORCE_REBUILD = False
+FORCE_REBUILD = True
 STRICT_TR_REQUIRED = True
 
 logging.basicConfig(
