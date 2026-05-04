@@ -5,8 +5,6 @@ import pandas as pd
 
 from src.stats import weighted_quantile
 
-LABOUR_INCOME_MONTHLY_LIMIT_DEFAULT = 600.0
-
 
 def apply_age_rule(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -137,16 +135,7 @@ def apply_household_type_gate(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def apply_threeplus_adults_rule(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Set rmi_threeplus_adults_allowed based on the region's three-plus-adults policy.
 
-    Regions with baseline_threeplus_rule == 'allow_all' skip this gate (always 1).
-    Others use baseline_exclude_threeplus_adults:
-    - True  (hard exclusion): threeplus households are never eligible.
-    - False (soft exclusion): threeplus is allowed only for single-nucleus households
-      (multi_nucleus_proxy == 0), i.e. no evidence of multiple cohabiting family units.
-    Result is NaN when neither condition applies.
-    """
     out = df.copy()
 
     is_threeplus = out["threeplus_adults"].eq(1)
@@ -167,208 +156,81 @@ def apply_threeplus_adults_rule(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
 
-def apply_labour_rule(
-    df: pd.DataFrame,
-    labour_income_limit: float = LABOUR_INCOME_MONTHLY_LIMIT_DEFAULT,
-) -> pd.DataFrame:
     out = df.copy()
 
-    labour_income = pd.to_numeric(out["labour_income_hh_monthly"], errors="coerce")
-    labour_income_ok = labour_income.le(labour_income_limit)
+    rp_observed = out["responsible_person_proxy_available"].eq(1)
 
-    labour_context_ok = (
-        out["any_unemployed_18_64"].eq(1)
-        | out["all_working_age_nonworking"].eq(1)
-        | out["any_responsible_person_active_search"].eq(1)
-        | out["any_social_assistance_income_hh"].eq(1)
+    rp1_unemployed = out["rp1_activity_status_detail"].astype("string").eq("unemployed")
+    rp2_unemployed = out["rp2_activity_status_detail"].astype("string").eq("unemployed")
+    any_rp_unemployed = rp1_unemployed | rp2_unemployed
+
+    all_nonworking = out["all_working_age_nonworking"].eq(1)
+
+    rp1_not_refusing = out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
+    rp2_not_refusing = out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()
+    any_rp_unemployed_not_refusing = (
+        (rp1_unemployed & rp1_not_refusing) |
+        (rp2_unemployed & rp2_not_refusing)
     )
 
-    out["rmi_labour_income_eligible"] = np.where(
-        labour_income.notna(), labour_income_ok.astype(float), np.nan
-    )
+    gate_none     = pd.Series(True, index=out.index)
+    gate_standard = any_rp_unemployed | all_nonworking
+    gate_strict   = any_rp_unemployed_not_refusing | all_nonworking
 
-    out["rmi_labour_context_eligible"] = np.where(
-        out["has_labour_composition"].eq(1)
-        | out["responsible_person_proxy_available"].eq(1),
-        labour_context_ok.astype(float),
-        np.nan,
-    )
+    profile = out["labour_gate_profile"].astype("string")
 
-    strict_labour_ok = np.where(
-        out["rmi_labour_income_eligible"].eq(1)
-        & out["rmi_labour_context_eligible"].eq(1),
-        1.0,
-        np.where(
-            out["rmi_labour_income_eligible"].isna()
-            | out["rmi_labour_context_eligible"].isna(),
-            np.nan,
-            0.0,
-        ),
-    )
-
-    relaxed_labour_ok = np.where(
-        out["rmi_labour_income_eligible"].eq(1),
-        1.0,
-        np.where(out["rmi_labour_income_eligible"].isna(), np.nan, 0.0),
-    )
-
-    out["rmi_labour_eligible"] = np.where(
-        out["baseline_relax_labour_gate"].eq(True), relaxed_labour_ok, strict_labour_ok
-    )
-
-    out["rmi_labour_rule_source"] = np.select(
-        [
-            out["rmi_labour_income_eligible"].isna(),
-            out["baseline_relax_labour_gate"].eq(True)
-            & out["rmi_labour_income_eligible"].eq(1),
-            out["rmi_labour_income_eligible"].eq(0),
-            out["baseline_relax_labour_gate"].eq(False)
-            & out["rmi_labour_context_eligible"].eq(0),
-            out["baseline_relax_labour_gate"].eq(False)
-            & out["rmi_labour_eligible"].eq(1),
-        ],
-        [
-            "labour_rule_not_observable",
-            "relaxed_labour_income_only_rule",
-            "fails_labour_income_rule",
-            "fails_labour_context_rule",
-            "labour_income_and_context_rule",
-        ],
-        default="other",
-    )
-
-    return out
-
-
-def apply_region_specific_insertion_rules(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-
-    out["rmi_insertion_rule_eligible"] = 1.0
-    out["rmi_insertion_rule_source"] = "not_applicable"
-
-    # Andalusia
-    mask = out["nuts_code"].eq("ES61")
-    ok = out["any_responsible_person_active_search"].eq(1) | out[
-        "any_social_assistance_income_hh"
-    ].eq(1)
-    out.loc[mask, "rmi_insertion_rule_eligible"] = np.where(ok[mask], 1.0, 0.0)
-    out.loc[mask, "rmi_insertion_rule_source"] = np.where(
-        ok[mask], "andalusia_insertion_proxy", "fails_andalusia_insertion_proxy"
-    )
-
-    # Castilla-La Mancha
-    mask = out["nuts_code"].eq("ES42")
-    ok = out["any_responsible_person_active_search"].eq(1) & out[
-        "any_responsible_person_claimant_eligible"
-    ].eq(1)
-    out.loc[mask, "rmi_insertion_rule_eligible"] = np.where(ok[mask], 1.0, 0.0)
-    out.loc[mask, "rmi_insertion_rule_source"] = np.where(
-        ok[mask], "clm_insertion_proxy", "fails_clm_insertion_proxy"
-    )
-
-    # Extremadura
-    mask = out["nuts_code"].eq("ES43")
-    ok = out["any_responsible_person_active_search"].eq(1) | out[
-        "any_social_assistance_income_hh"
-    ].eq(1)
-    out.loc[mask, "rmi_insertion_rule_eligible"] = np.where(ok[mask], 1.0, 0.0)
-    out.loc[mask, "rmi_insertion_rule_source"] = np.where(
-        ok[mask], "extremadura_insertion_proxy", "fails_extremadura_insertion_proxy"
-    )
-
-    # Madrid
-    mask = out["nuts_code"].eq("ES30")
-    ok = (
-        out["any_responsible_person_active_search"].eq(1)
-        | (out["any_unemployed_18_64"].eq(1) & out["all_unemployed_searching"].eq(1))
-        | out["any_social_assistance_income_hh"].eq(1)
-    )
-    out.loc[mask, "rmi_insertion_rule_eligible"] = np.where(ok[mask], 1.0, 0.0)
-    out.loc[mask, "rmi_insertion_rule_source"] = np.where(
-        ok[mask], "madrid_insertion_proxy", "fails_madrid_insertion_proxy"
-    )
-
-    # Castilla y León
-    mask = out["nuts_code"].eq("ES41")
-    ok = out["any_responsible_person_active_search"].eq(1) | (
-        out["any_unemployed_18_64"].eq(1) & out["all_unemployed_searching"].eq(1)
-    )
-    out.loc[mask, "rmi_insertion_rule_eligible"] = np.where(ok[mask], 1.0, 0.0)
-    out.loc[mask, "rmi_insertion_rule_source"] = np.where(
-        ok[mask], "cyl_insertion_proxy", "fails_cyl_insertion_proxy"
-    )
-
-    # Valencia
-    mask = out["nuts_code"].eq("ES52")
-    ok = out["any_responsible_person_active_search"].eq(1) | out[
-        "any_social_assistance_income_hh"
-    ].eq(1)
-    out.loc[mask, "rmi_insertion_rule_eligible"] = np.where(ok[mask], 1.0, 0.0)
-    out.loc[mask, "rmi_insertion_rule_source"] = np.where(
-        ok[mask], "valencia_insertion_proxy", "fails_valencia_insertion_proxy"
-    )
-
-    return out
-
-
-def add_active_inclusion_gate(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-
-    base_active_inclusion_ok = (
-        out["rmi_claimant_proxy_eligible"].eq(1)
-        & (
-            out["any_responsible_person_active_search"].eq(1)
-            | (
-                out["any_unemployed_18_64"].eq(1)
-                & out["all_unemployed_searching"].eq(1)
-            )
-            | out["any_social_assistance_income_hh"].eq(1)
-        )
-    ).astype(float)
-
-    out["active_inclusion_ok"] = np.where(
-        out["baseline_apply_active_inclusion_gate"].eq(True),
-        base_active_inclusion_ok,
-        1.0,
-    )
-
-    out["active_inclusion_gate_applied"] = np.where(
-        out["baseline_apply_active_inclusion_gate"].eq(True), 1.0, 0.0
-    )
-
-    return out
-
-
-def add_percentile_filter(df: pd.DataFrame, quantile: float) -> pd.DataFrame:
-    out = df.copy()
-
-    cutoff_map = (
-        out.groupby("year")
-        .apply(
-            lambda g: weighted_quantile(
-                g["pfilter_resources_monthly"], g["weight_hh"], quantile
-            )
-        )
-        .to_dict()
-    )
-
-    out["percentile_cutoff_monthly"] = out["year"].map(cutoff_map)
-
-    out["passes_percentile_filter"] = np.select(
-        [
-            out["pfilter_resources_monthly"].isna()
-            | out["percentile_cutoff_monthly"].isna(),
-            out["pfilter_resources_monthly"] <= out["percentile_cutoff_monthly"],
-            out["pfilter_resources_monthly"] > out["percentile_cutoff_monthly"],
-        ],
-        [np.nan, 1.0, 0.0],
+    region_gate = np.select(
+        [profile.eq("none"), profile.eq("standard"), profile.eq("strict")],
+        [gate_none.astype(float), gate_standard.astype(float), gate_strict.astype(float)],
         default=np.nan,
     )
 
-    out["percentile_rule"] = f"bottom_{int(quantile * 100)}pct"
+    out["rmi_labour_gate"] = np.where(rp_observed, region_gate, 1.0)
+
+    out["rmi_labour_gate_source"] = np.select(
+        [
+            ~rp_observed,
+            profile.eq("none"),
+            profile.eq("standard") & rp_observed & gate_standard,
+            profile.eq("standard") & rp_observed & ~gate_standard,
+            profile.eq("strict")   & rp_observed & gate_strict,
+            profile.eq("strict")   & rp_observed & ~gate_strict,
+        ],
+        [
+            "rp_not_observed",
+            "no_conditionality_region",
+            "passes_standard_gate",
+            "fails_standard_gate",
+            "passes_strict_gate",
+            "fails_strict_gate",
+        ],
+        default="unrecognised_profile",
+    )
+
+    out["labour_no_gate"]                  = 1.0
+    out["labour_unemployed_or_nonworking"] = np.where(rp_observed, gate_standard.astype(float), 1.0)
+    out["labour_unemployed_searching"]     = np.where(rp_observed, gate_strict.astype(float), 1.0)
+
     return out
 
+
+def compute_income_concept_versions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Two income concept versions for sensitivity analysis.
+
+    before_transfers : resources_proxy_baseline_monthly (main spec)
+    after_transfers  : income_after_transfers_monthly (upper bound)
+    """
+    out = df.copy()
+    out["resources_before_transfers"] = pd.to_numeric(
+        out["resources_proxy_baseline_monthly"], errors="coerce"
+    )
+    out["resources_after_transfers"] = pd.to_numeric(
+        out["income_after_transfers_monthly"], errors="coerce"
+    )
+    return out
 
 def compute_wealth_versions(df: pd.DataFrame) -> pd.DataFrame:
     """
