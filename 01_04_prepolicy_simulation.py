@@ -41,7 +41,7 @@ from src.summaries import (
     make_household_type_sensitivity_table,
     make_year_summary_main,
     make_region_summary_main,
-    diagnose_undersimulated_regions,
+    make_validation_table,
 )
 
 BASE_PATH = Path(".").resolve()
@@ -66,6 +66,7 @@ OUTPUT_INCOME = BASE_PATH / f"rmi_baseline_{RUN_TAG}_income_sensitivity.parquet"
 OUTPUT_HHTYPE = BASE_PATH / f"rmi_baseline_{RUN_TAG}_household_type_sensitivity.parquet"
 OUTPUT_YEAR_MAIN   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_year_summary_main.parquet"
 OUTPUT_REGION_MAIN = BASE_PATH / f"rmi_baseline_{RUN_TAG}_region_summary_main.parquet"
+OUTPUT_VALIDATION = BASE_PATH / f"rmi_baseline_{RUN_TAG}_validation.parquet"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
@@ -97,12 +98,6 @@ def main() -> None:
     sim = compute_income_concept_versions(sim)
     sim = compute_household_type_versions(sim)
     sim = finalize_main_spec(sim)
-
-    diagnose_undersimulated_regions(
-        sim,
-        regions=["ES21", "ES22", "ES24", "ES53", "ES13", "ES23", "ES12"],
-        years=PRE_YEARS,
-    )
 
     sim = reorder_columns(sim)
 
@@ -245,6 +240,14 @@ def main() -> None:
     )
     print(obs_counts.sort_values("n_mean"))
 
+    
+    validation = make_validation_table(
+        sim,
+        obs_path=BASE_PATH / "policy_db" / "rmi_2017_observed_validation.csv",
+    )
+    validation.to_parquet(OUTPUT_VALIDATION, index=False)
+
+
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)
     year_summary.to_parquet(OUTPUT_YEAR, index=False)
@@ -267,6 +270,7 @@ def main() -> None:
     logger.info("Saved household type sensitivity to %s", OUTPUT_HHTYPE)
     logger.info("Saved main year summary to %s", OUTPUT_YEAR_MAIN)
     logger.info("Saved main region summary to %s", OUTPUT_REGION_MAIN)
+    logger.info("Saved validation table to %s", OUTPUT_VALIDATION)
 
 if __name__ == "__main__":
     main()

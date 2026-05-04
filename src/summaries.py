@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
+from pathlib import Path
 from src.stats import safe_pct_gap, weighted_share
 
 def get_titulares_2017(df: pd.DataFrame) -> dict[str, float]:
@@ -71,6 +71,80 @@ def make_region_summary(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     return pd.DataFrame(rows).sort_values(["year", "region_name_policy"])
+
+def make_validation_table(
+    df: pd.DataFrame,
+    obs_path: str | Path,
+) -> pd.DataFrame:
+    from scipy.stats import spearmanr
+
+    obs = pd.read_csv(Path(obs_path))
+
+    rows = []
+    for nuts_code, g in df.groupby("nuts_code"):
+        region = g["region_name_policy"].dropna().iloc[0]
+        row = {"nuts_code": nuts_code, "region_name_policy": region}
+
+
+        year_titulares = (
+            g.groupby("year")
+            .apply(lambda gy: gy.loc[gy["rmi_positive_entitlement_main"].eq(1), "weight_hh"].sum())
+        )
+        row["sim_titulares_main"] = year_titulares.mean()
+
+        # --- three-year averaged simulated monthly benefit under main spec ---
+        year_benefits = []
+        for year, gy in g.groupby("year"):
+            mask = gy["rmi_positive_entitlement_main"].eq(1)
+            if mask.any():
+                avg = (
+                    gy.loc[mask, "rmi_income_gap_entitlement_monthly"]
+                    .multiply(gy.loc[mask, "weight_hh"])
+                    .sum()
+                    / gy.loc[mask, "weight_hh"].sum()
+                )
+                year_benefits.append(avg)
+        row["sim_avg_monthly_benefit"] = np.mean(year_benefits) if year_benefits else np.nan
+
+        rows.append(row)
+
+    sim = pd.DataFrame(rows)
+
+    # --- merge with observed ---
+    out = obs.merge(sim, on="nuts_code", how="left")
+
+    # --- ratios ---
+    out["ratio_titulares"] = out["sim_titulares_main"] / out["titulares_2017"]
+    out["ratio_benefit"]   = out["sim_avg_monthly_benefit"] / out["obs_avg_monthly_benefit"]
+
+    # --- rank correlations ---
+    valid = out.dropna(subset=[
+        "sim_titulares_main", "titulares_2017",
+        "sim_avg_monthly_benefit", "obs_avg_monthly_benefit"
+    ])
+
+    rho_titulares, p_titulares = spearmanr(
+        valid["sim_titulares_main"], valid["titulares_2017"]
+    )
+    rho_benefit, p_benefit = spearmanr(
+        valid["sim_avg_monthly_benefit"], valid["obs_avg_monthly_benefit"]
+    )
+
+    out = out.sort_values("nuts_code")
+
+    print("\n" + "="*110)
+    print("VALIDATION TABLE — SIMULATED (3-YEAR AVERAGE) VS OBSERVED RMI 2017")
+    print("Source: Informe RMI 2017, Cuadro 7 (titulares) and Cuadro 8 (gasto)")
+    print("="*110)
+    print(out[[
+        "nuts_code", "region",
+        "titulares_2017", "sim_titulares_main", "ratio_titulares",
+        "obs_avg_monthly_benefit", "sim_avg_monthly_benefit", "ratio_benefit",
+    ]].round(2).to_string(index=False))
+    print(f"\nSpearman rank correlation — titulares: rho={rho_titulares:.3f} (p={p_titulares:.3f})")
+    print(f"Spearman rank correlation — avg monthly benefit: rho={rho_benefit:.3f} (p={p_benefit:.3f})")
+
+    return out
 
 def make_region_diagnostic_table(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
