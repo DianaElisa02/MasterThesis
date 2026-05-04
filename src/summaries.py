@@ -200,7 +200,6 @@ def make_region_diagnostic_table(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(rows).sort_values(["year", "pct_gap"], ascending=[True, False])
 
-
 def make_eligibility_funnel(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
 
@@ -217,18 +216,16 @@ def make_eligibility_funnel(df: pd.DataFrame) -> pd.DataFrame:
 
         w = g["weight_hh"]
 
-        m_region = g["baseline_main_included"].fillna(False)
-        m_amount = m_region & g["rmi_amount_rule_available"].eq(1)
-        m_age = m_amount & g["rmi_age_eligible"].eq(1)
-        m_claimant = m_age & g["rmi_claimant_proxy_eligible"].eq(1)
-        m_wealth = m_claimant & g["rmi_wealth_eligible"].eq(1)
-        m_hhtype = m_wealth & g["rmi_hhtype_eligible"].eq(1)
-        m_threeplus = m_hhtype & g["rmi_threeplus_adults_allowed"].eq(1)
-        m_labour = m_threeplus & g["rmi_labour_eligible"].eq(1)
-        m_inclusion = m_labour & g["active_inclusion_ok"].eq(1)
-        m_pfilter = m_inclusion & g["passes_percentile_filter"].eq(1)
-        m_income = m_pfilter & g["rmi_income_eligible"].eq(1)
-        m_final = m_income & g["rmi_sim_eligible"].eq(1)
+        m_region    = g["baseline_main_included"].fillna(False)
+        m_amount    = m_region   & g["rmi_amount_rule_available"].eq(1)
+        m_age       = m_amount   & g["rmi_age_eligible"].eq(1)
+        m_claimant  = m_age      & g["rmi_claimant_proxy_eligible"].eq(1)
+        m_wealth    = m_claimant & g["rmi_wealth_eligible"].eq(1)
+        m_hhtype    = m_wealth   & g["rmi_hhtype_eligible"].eq(1)
+        m_threeplus = m_hhtype   & g["rmi_threeplus_adults_allowed"].eq(1)
+        m_labour    = m_threeplus & g["rmi_labour_gate"].eq(1)
+        m_income    = m_labour   & g["rmi_income_eligible"].eq(1)
+        m_final     = m_income   & g["rmi_sim_eligible"].eq(1)
 
         rows.append(
             {
@@ -243,9 +240,7 @@ def make_eligibility_funnel(df: pd.DataFrame) -> pd.DataFrame:
                 "after_wealth_rule": w.loc[m_wealth].sum(),
                 "after_hh_type_rule": w.loc[m_hhtype].sum(),
                 "after_threeplus_rule": w.loc[m_threeplus].sum(),
-                "after_labour_rule": w.loc[m_labour].sum(),
-                "after_active_inclusion": w.loc[m_inclusion].sum(),
-                "after_percentile_filter": w.loc[m_pfilter].sum(),
+                "after_labour_gate": w.loc[m_labour].sum(),
                 "after_income_test": w.loc[m_income].sum(),
                 "final_simulated": w.loc[m_final].sum(),
             }
@@ -253,66 +248,33 @@ def make_eligibility_funnel(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(rows).sort_values(["year", "region_name_policy"])
 
-
-def make_labour_rule_diagnostic(df: pd.DataFrame) -> pd.DataFrame:
+def make_labour_gate_diagnostic(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-
     for (nuts_code, year), g in df.groupby(["nuts_code", "year"]):
         total = g["weight_hh"].sum()
-
-        region_names = g["region_name_policy"].dropna().unique()
-        if len(region_names) != 1:
-            raise ValueError(
-                f"Expected exactly one region_name_policy for nuts_code={nuts_code}, year={year}, "
-                f"found {region_names.tolist()}"
-            )
-        region = region_names[0]
-
-        labour_ok = g.loc[g["rmi_labour_eligible"] == 1, "weight_hh"].sum()
-        source_relaxed = g.loc[
-            g["rmi_labour_rule_source"] == "relaxed_labour_income_only_rule", "weight_hh"
-        ].sum()
-        source_full = g.loc[
-            g["rmi_labour_rule_source"] == "labour_income_and_context_rule", "weight_hh"
-        ].sum()
-        source_fail_income = g.loc[
-            g["rmi_labour_rule_source"] == "fails_labour_income_rule", "weight_hh"
-        ].sum()
-        source_fail_context = g.loc[
-            g["rmi_labour_rule_source"] == "fails_labour_context_rule", "weight_hh"
-        ].sum()
-        source_missing = g.loc[
-            g["rmi_labour_rule_source"] == "labour_rule_not_observable", "weight_hh"
-        ].sum()
-
+        region = g["region_name_policy"].dropna().unique()[0]
         rows.append(
             {
                 "nuts_code": nuts_code,
                 "region_name_policy": region,
                 "year": year,
+                "labour_gate_profile": g["labour_gate_profile"].iloc[0],
                 "total_households": total,
-                "labour_eligible": labour_ok,
-                "share_labour_eligible": labour_ok / total if total > 0 else np.nan,
-                "share_relaxed_labour_income_only_rule": source_relaxed / total
-                if total > 0
-                else np.nan,
-                "share_labour_income_and_context_rule": source_full / total
-                if total > 0
-                else np.nan,
-                "share_fails_labour_income_rule": source_fail_income / total
-                if total > 0
-                else np.nan,
-                "share_fails_labour_context_rule": source_fail_context / total
-                if total > 0
-                else np.nan,
-                "share_labour_rule_not_observable": source_missing / total
-                if total > 0
-                else np.nan,
+                "share_passes_main_gate": weighted_share(
+                    g["rmi_labour_gate"], g["weight_hh"], 1.0
+                ),
+                "share_no_gate": weighted_share(
+                    g["labour_no_gate"], g["weight_hh"], 1.0
+                ),
+                "share_unemployed_or_nonworking": weighted_share(
+                    g["labour_unemployed_or_nonworking"], g["weight_hh"], 1.0
+                ),
+                "share_unemployed_searching": weighted_share(
+                    g["labour_unemployed_searching"], g["weight_hh"], 1.0
+                ),
             }
         )
-
     return pd.DataFrame(rows).sort_values(["year", "region_name_policy"])
-
 
 def debug_income_distribution(sim: pd.DataFrame) -> None:
     print("\n" + "=" * 80)
@@ -364,7 +326,7 @@ def make_wealth_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def make_labour_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for version in ["no_gate", "strict_only", "universal"]:
+    for version in ["no_gate", "unemployed_or_nonworking", "unemployed_searching"]:
         col = f"labour_{version}"
         for year, g in df.groupby("year"):
             eligible_w = g["rmi_sim_eligible"].eq(1) & g[col].eq(1)

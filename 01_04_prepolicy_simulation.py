@@ -19,6 +19,7 @@ from src.eligibility import (
     apply_claimant_proxy_rule,
     apply_household_type_gate,
     apply_labour_status_gate,
+    apply_threeplus_adults_rule,
     apply_wealth_test,
     compute_household_type_versions,
     compute_wealth_versions,
@@ -72,23 +73,24 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     hh, rules, schedule, coverage, eligibility = load_inputs(
-    INPUT_HH, INPUT_RULES, INPUT_SCHEDULE, INPUT_COVERAGE, INPUT_ELIGIBILITY
-)
+        INPUT_HH, INPUT_RULES, INPUT_SCHEDULE, INPUT_COVERAGE, INPUT_ELIGIBILITY
+    )
 
     hh = prepare_households(hh, years=PRE_YEARS)
     rules = prepare_rules(rules, eligibility, years=PRE_YEARS)
     schedule = prepare_schedule(schedule, years=PRE_YEARS)
     coverage = prepare_coverage(coverage)
     sim = merge_inputs(hh, rules, schedule, coverage)
-    sim = add_multi_nucleus_proxy(sim)
     sim = apply_age_rule(sim)
     sim = apply_claimant_proxy_rule(sim)
-    sim = apply_wealth_test(sim)
-    sim = apply_household_type_gate(sim)
-    sim = apply_labour_status_gate(sim)
     sim = assign_guaranteed_amount(sim)
     sim = compute_income_gap(sim)
     sim = finalize_entitlement(sim)
+    sim = add_multi_nucleus_proxy(sim)
+    sim = apply_wealth_test(sim)
+    sim = apply_household_type_gate(sim)
+    sim = apply_threeplus_adults_rule(sim)
+    sim = apply_labour_status_gate(sim)
     sim = compute_wealth_versions(sim)
     sim = compute_income_concept_versions(sim)
     sim = compute_household_type_versions(sim)

@@ -104,7 +104,6 @@ def compute_income_gap(df: pd.DataFrame) -> pd.DataFrame:
     min_floor = out["nuts_code"].map(REGIONAL_MIN_ENTITLEMENT).fillna(0.0)
     out["rmi_regional_min_floor"] = min_floor
 
-    # A household with a gap below the regional minimum would receive nothing
     gap_above_floor = pd.Series(raw_gap, index=out.index) >= min_floor
 
     out["rmi_income_eligible"] = np.where(

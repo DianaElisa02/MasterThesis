@@ -113,12 +113,16 @@ def apply_household_type_gate(df: pd.DataFrame) -> pd.DataFrame:
     is_simple_type = (
         out["single_adult"].eq(1) | out["single_parent"].eq(1) | out["two_adults"].eq(1)
     )
-    is_single_nucleus_threeplus = out["threeplus_adults"].eq(1) & out["multi_nucleus_proxy"].eq(0)
+    is_single_nucleus_threeplus = (
+        out["threeplus_adults"].eq(1) & out["multi_nucleus_proxy"].eq(0)
+    )
 
     out["rmi_hhtype_eligible"] = np.select(
         [
             out["baseline_allowed_hh_types"].eq("all_household_types"),
-            out["baseline_allowed_hh_types"].eq("single_adult_single_parent_two_adults_only"),
+            out["baseline_allowed_hh_types"].eq(
+                "single_adult_single_parent_two_adults_only"
+            ),
             out["baseline_allowed_hh_types"].eq(
                 "single_adult_single_parent_two_adults_plus_restricted_threeplus"
             ),
@@ -135,14 +139,15 @@ def apply_household_type_gate(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def apply_threeplus_adults_rule(df: pd.DataFrame) -> pd.DataFrame:
-
     out = df.copy()
 
     is_threeplus = out["threeplus_adults"].eq(1)
     is_single_nucleus = out["multi_nucleus_proxy"].eq(0)
 
     not_threeplus = (~is_threeplus).astype(float)
-    threeplus_ok_if_single_nucleus = np.where(is_threeplus, is_single_nucleus.astype(float), 1.0)
+    threeplus_ok_if_single_nucleus = np.where(
+        is_threeplus, is_single_nucleus.astype(float), 1.0
+    )
 
     out["rmi_threeplus_adults_allowed"] = np.select(
         [
@@ -156,8 +161,29 @@ def apply_threeplus_adults_rule(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
 
+def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Labour market status gate based on regional conditionality profile.
+
+    Reads labour_gate_profile (one of three values):
+
+    none     — guaranteed income schemes (Basque Country, Navarra, Balearic
+               Islands). No labour status condition.
+    standard — classic RMI: RP must be unemployed OR all working-age adults
+               non-working.
+    strict   — explicit insertion conditionality (Andalusia, Canary Islands,
+               Castilla-La Mancha): RP unemployed with no evidence of search
+               refusal, OR all working-age nonworking.
+
+    Missing active_job_search treated as not refusing (charitable default).
+    Where RP not observed, gate passes by default.
+
+    Also produces three sensitivity columns:
+      labour_no_gate
+      labour_unemployed_or_nonworking
+      labour_unemployed_searching
+    """
     out = df.copy()
 
     rp_observed = out["responsible_person_proxy_available"].eq(1)
@@ -168,35 +194,51 @@ def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
 
     all_nonworking = out["all_working_age_nonworking"].eq(1)
 
-    rp1_not_refusing = out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
-    rp2_not_refusing = out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()
+    rp1_not_refusing = (
+        out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
+    )
+    rp2_not_refusing = (
+        out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()
+    )
     any_rp_unemployed_not_refusing = (
         (rp1_unemployed & rp1_not_refusing) |
         (rp2_unemployed & rp2_not_refusing)
     )
 
-    gate_none     = pd.Series(True, index=out.index)
-    gate_standard = any_rp_unemployed | all_nonworking
-    gate_strict   = any_rp_unemployed_not_refusing | all_nonworking
-
-    profile = out["labour_gate_profile"].astype("string")
+    # Convert all boolean conditions to numpy arrays to avoid np.select dtype issues
+    gate_none     = np.ones(len(out), dtype=bool)
+    gate_standard = (any_rp_unemployed | all_nonworking).to_numpy()
+    gate_strict   = (any_rp_unemployed_not_refusing | all_nonworking).to_numpy()
+    rp_observed_np = rp_observed.to_numpy()
+    profile_np     = out["labour_gate_profile"].astype("string").to_numpy()
 
     region_gate = np.select(
-        [profile.eq("none"), profile.eq("standard"), profile.eq("strict")],
-        [gate_none.astype(float), gate_standard.astype(float), gate_strict.astype(float)],
+        [
+            profile_np == "none",
+            profile_np == "standard",
+            profile_np == "strict",
+        ],
+        [
+            gate_none.astype(float),
+            gate_standard.astype(float),
+            gate_strict.astype(float),
+        ],
         default=np.nan,
     )
 
-    out["rmi_labour_gate"] = np.where(rp_observed, region_gate, 1.0)
+    out["rmi_labour_gate"] = np.where(rp_observed_np, region_gate, 1.0)
+
+    is_standard = (profile_np == "standard") & rp_observed_np
+    is_strict   = (profile_np == "strict")   & rp_observed_np
 
     out["rmi_labour_gate_source"] = np.select(
         [
-            ~rp_observed,
-            profile.eq("none"),
-            profile.eq("standard") & rp_observed & gate_standard,
-            profile.eq("standard") & rp_observed & ~gate_standard,
-            profile.eq("strict")   & rp_observed & gate_strict,
-            profile.eq("strict")   & rp_observed & ~gate_strict,
+            ~rp_observed_np,
+            profile_np == "none",
+            is_standard &  gate_standard,
+            is_standard & ~gate_standard,
+            is_strict   &  gate_strict,
+            is_strict   & ~gate_strict,
         ],
         [
             "rp_not_observed",
@@ -209,28 +251,16 @@ def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
         default="unrecognised_profile",
     )
 
-    out["labour_no_gate"]                  = 1.0
-    out["labour_unemployed_or_nonworking"] = np.where(rp_observed, gate_standard.astype(float), 1.0)
-    out["labour_unemployed_searching"]     = np.where(rp_observed, gate_strict.astype(float), 1.0)
+    out["labour_no_gate"] = 1.0
+    out["labour_unemployed_or_nonworking"] = np.where(
+        rp_observed_np, gate_standard.astype(float), 1.0
+    )
+    out["labour_unemployed_searching"] = np.where(
+        rp_observed_np, gate_strict.astype(float), 1.0
+    )
 
     return out
 
-
-def compute_income_concept_versions(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Two income concept versions for sensitivity analysis.
-
-    before_transfers : resources_proxy_baseline_monthly (main spec)
-    after_transfers  : income_after_transfers_monthly (upper bound)
-    """
-    out = df.copy()
-    out["resources_before_transfers"] = pd.to_numeric(
-        out["resources_proxy_baseline_monthly"], errors="coerce"
-    )
-    out["resources_after_transfers"] = pd.to_numeric(
-        out["income_after_transfers_monthly"], errors="coerce"
-    )
-    return out
 
 def compute_wealth_versions(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -265,60 +295,26 @@ def compute_wealth_versions(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def compute_labour_gate_versions(df: pd.DataFrame) -> pd.DataFrame:
+def compute_household_type_versions(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Three labour gate versions computed as sensitivity columns.
+    Three household type versions computed as sensitivity columns.
     NOT part of main eligibility — applied on top of rmi_sim_eligible.
 
-    Versions derived from baseline_conditionality_profile:
-    no_gate     : all households pass
-    strict_only : gate applied only where conditionality_profile == 'strict'
-                  (Andalusia, Canary Islands, Castilla-La Mancha), which
-                  explicitly required unemployed registration as a precondition
-                  per Informe RMI 2017, Cuadro 3-2.
-    universal   : gate applied to all regions
-
-    Gate condition: at least one responsible person is unemployed AND searching.
-    Missing active_job_search is treated as searching — exclusion requires
-    positive evidence of non-search (charitable default).
+    no_restriction    : all household compositions pass
+    proxy_restricted  : 3+ adult households excluded if multi-unit proxy fires
+    strict_household  : only single adult, single parent, two-adult households pass
     """
-    out = df.copy()
-
-    rp1_unemployed = out["rp1_activity_status_detail"].astype("string").eq("unemployed")
-    rp2_unemployed = out["rp2_activity_status_detail"].astype("string").eq("unemployed")
-
-    rp1_searching = out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
-    rp2_searching = out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()
-
-    rp_observed = out["responsible_person_proxy_available"].eq(1)
-
-    gate_passes = (rp1_unemployed & rp1_searching) | (rp2_unemployed & rp2_searching)
-
-    gate_result = np.where(rp_observed, gate_passes.astype(float), 1.0)
-
-    is_strict = out["baseline_conditionality_profile"].eq("strict")
-
-    out["labour_no_gate"] = 1.0
-    out["labour_strict_only"] = np.where(is_strict, gate_result, 1.0)
-    out["labour_universal"] = gate_result
-
-    return out
-
-def compute_household_type_versions(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     out["hhtype_no_restriction"] = 1.0
 
-    n_adults = pd.to_numeric(out["n_adults_18plus"], errors="coerce").fillna(0)
-    n_working = pd.to_numeric(out["n_working_18_64"], errors="coerce").fillna(0)
+    n_adults     = pd.to_numeric(out["n_adults_18plus"],    errors="coerce").fillna(0)
+    n_working    = pd.to_numeric(out["n_working_18_64"],    errors="coerce").fillna(0)
     n_unemployed = pd.to_numeric(out["n_unemployed_18_64"], errors="coerce").fillna(0)
 
     multi_unit_proxy = (
         (n_adults >= 3) &
-        (
-            (n_working >= 2) |
-            (n_unemployed >= 2)
-        )
+        ((n_working >= 2) | (n_unemployed >= 2))
     )
 
     is_proxy_region = out["legal_unit_type"].fillna("").str.endswith("_proxy")

@@ -68,11 +68,11 @@ def prepare_households(
     missing = [c for c in HOUSEHOLD_REQUIRED_COLUMNS if c not in out.columns]
     if missing:
         raise KeyError(f"Missing columns in household input: {missing}")
-
+    
     string_cols = {"rp1_activity_status_detail", "rp2_activity_status_detail"}
     for c in HOUSEHOLD_REQUIRED_COLUMNS:
-     if c not in string_cols:
-        out[c] = pd.to_numeric(out[c], errors="coerce")
+        if c not in string_cols:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
 
     out["threshold_resources_monthly"] = out["resources_proxy_baseline_monthly"]
     out["pfilter_resources_monthly"] = out["resources_proxy_excl_capital_monthly"]
@@ -112,10 +112,9 @@ def prepare_rules(
         "baseline_has_listed_schedule",
         "baseline_formula_region",
         "baseline_needs_special_handling",
-        "baseline_apply_active_inclusion_gate",
-        "baseline_relax_labour_gate",
         "baseline_non_takeup_group",
         "baseline_conditionality_profile",
+        "labour_gate_profile",
         "baseline_scheme_structure",
         "baseline_amount_topup_factor",
     ]
@@ -138,7 +137,6 @@ def prepare_rules(
     out = out.merge(legal_unit, on=["nuts_code", "year"], how="left", validate="1:1")
 
     return out
-
 
 def prepare_schedule(schedule: pd.DataFrame, years: list[int]) -> pd.DataFrame:
     schedule = schedule.loc[schedule["year"].isin(years)].copy()
@@ -205,11 +203,16 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "weight_hh",
         "household_size",
         "hh_size_rule",
+        "pfilter_resources_monthly",
         "threshold_resources_monthly",
+        "resources_before_transfers",
+        "resources_after_transfers",
         "baseline_main_included",
         "baseline_amount_method",
         "baseline_age_threshold",
         "baseline_conditionality_profile",
+        "labour_gate_profile",
+        "baseline_non_takeup_group",
         "baseline_scheme_structure",
         "rmi_guaranteed_amount_monthly",
         "rmi_amount_assignment_type",
@@ -217,18 +220,26 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "rmi_age_rule_source",
         "rmi_claimant_proxy_eligible",
         "rmi_claimant_proxy_source",
+        "rmi_wealth_eligible",
+        "rmi_hhtype_eligible",
+        "rmi_threeplus_adults_allowed",
+        "rmi_labour_gate",
+        "rmi_labour_gate_source",
         "rmi_income_eligible",
         "rmi_income_gap_entitlement_monthly",
         "rmi_sim_eligible",
         "rmi_simulated_benefit_monthly",
         "rmi_positive_entitlement",
         "rmi_exclusion_reason",
-        "wealth_no_test",
-        "wealth_strict",
-        "wealth_soft",
         "labour_no_gate",
-        "labour_strict_only",
-        "labour_universal",
+        "labour_unemployed_or_nonworking",
+        "labour_unemployed_searching",
+        "wealth_no_test",
+        "wealth_soft",
+        "wealth_strict",
+        "hhtype_no_restriction",
+        "hhtype_proxy_restricted",
+        "hhtype_strict_household",
     ]
     existing = [c for c in preferred if c in df.columns]
     remaining = [c for c in df.columns if c not in existing]
