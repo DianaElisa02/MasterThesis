@@ -13,7 +13,7 @@ REGIONAL_MIN_ENTITLEMENT: dict[str, float] = {
     "ES24": 0.00,    # Aragon — no minimum listed
     "ES30": 0.00,    # Madrid — no minimum listed
     "ES41": 0.00,    # Castilla y León — no minimum listed
-    "ES42": 300.00,  # Castilla-La Mancha — Informe RMI 2017, Cuadro 2
+    "ES42": 100.00,  # Castilla-La Mancha — Informe RMI 2017, Cuadro 2
     "ES43": 100.00,  # Extremadura — Informe RMI 2017, Cuadro 2
     "ES51": 60.93,   # Catalonia — Informe RMI 2017, Cuadro 2
     "ES52": 30.00,   # Valencia — Informe RMI 2017, Cuadro 2
@@ -247,7 +247,7 @@ def finalize_main_spec(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
 
-    is_guaranteed = out["nuts_code"].isin(["ES21", "ES22", "ES53", "ES13"])
+    is_guaranteed = out["nuts_code"].isin(["ES21", "ES22", "ES53", "ES13", "ES41"])
     out["income_concept_main"] = np.where(
         is_guaranteed,
         out["income_before_transfers_eligible"].fillna(0),
