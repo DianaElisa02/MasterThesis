@@ -9,16 +9,19 @@ from scipy.stats import spearmanr
 
 from src.amounts import (
     assign_guaranteed_amount,
-    compute_income_gap,
     compute_income_concept_versions,
+    compute_income_gap,
     finalize_entitlement,
 )
 from src.eligibility import (
+    add_multi_nucleus_proxy,
     apply_age_rule,
     apply_claimant_proxy_rule,
-    compute_wealth_versions,
-    compute_labour_gate_versions,
+    apply_household_type_gate,
+    apply_labour_status_gate,
+    apply_wealth_test,
     compute_household_type_versions,
+    compute_wealth_versions,
 )
 from src.io import (
     load_inputs,
@@ -77,30 +80,19 @@ def main() -> None:
     schedule = prepare_schedule(schedule, years=PRE_YEARS)
     coverage = prepare_coverage(coverage)
     sim = merge_inputs(hh, rules, schedule, coverage)
+    sim = add_multi_nucleus_proxy(sim)
     sim = apply_age_rule(sim)
     sim = apply_claimant_proxy_rule(sim)
+    sim = apply_wealth_test(sim)
+    sim = apply_household_type_gate(sim)
+    sim = apply_labour_status_gate(sim)
     sim = assign_guaranteed_amount(sim)
     sim = compute_income_gap(sim)
     sim = finalize_entitlement(sim)
     sim = compute_wealth_versions(sim)
-    sim = compute_labour_gate_versions(sim)
     sim = compute_income_concept_versions(sim)
     sim = compute_household_type_versions(sim)
 
-    sim = compute_household_type_versions(sim)
-
-# --- Temporary diagnostic for household type versions ---
-    print("\nn_adults_18plus sample values:")
-    print(pd.to_numeric(sim["n_adults_18plus"], errors="coerce").describe())
-    print("\nn_working_18_64 sample values:")
-    print(pd.to_numeric(sim["n_working_18_64"], errors="coerce").describe())
-    print("\nHouseholds with 3+ adults:")
-    n_adults = pd.to_numeric(sim["n_adults_18plus"], errors="coerce").fillna(0)
-    print((n_adults >= 3).value_counts())
-    print("\nHouseholds with 2+ working among 3+ adult households:")
-    n_working = pd.to_numeric(sim["n_working_18_64"], errors="coerce").fillna(0)
-    print(n_working[n_adults >= 3].describe())
-# --- End diagnostic ---
 
     sim = reorder_columns(sim)
 
