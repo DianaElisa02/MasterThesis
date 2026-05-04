@@ -3,10 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import pandas as pd
-
-from scipy.stats import spearmanr
-
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_concept_versions,
