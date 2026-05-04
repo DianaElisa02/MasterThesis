@@ -41,6 +41,7 @@ from src.summaries import (
     make_household_type_sensitivity_table,
     make_year_summary_main,
     make_region_summary_main,
+    diagnose_undersimulated_regions,
 )
 
 BASE_PATH = Path(".").resolve()
@@ -96,6 +97,13 @@ def main() -> None:
     sim = compute_income_concept_versions(sim)
     sim = compute_household_type_versions(sim)
     sim = finalize_main_spec(sim)
+
+    diagnose_undersimulated_regions(
+        sim,
+        regions=["ES21", "ES22", "ES24", "ES53", "ES13", "ES23", "ES12"],
+        years=PRE_YEARS,
+    )
+
     sim = reorder_columns(sim)
 
     year_summary = make_year_summary(sim)
@@ -217,6 +225,25 @@ def main() -> None:
             ascending=False,
             digits=3,
         )
+
+    obs_counts = (
+        sim.groupby(["nuts_code", "year"])["weight_hh"]
+        .count()
+        .unstack()
+        .rename(columns={2017: "n_2017", 2018: "n_2018", 2019: "n_2019"})
+    )
+    obs_counts["n_mean"] = obs_counts.mean(axis=1)
+    obs_counts["cv_simulated"] = (
+    sim.groupby(["nuts_code", "year"])["rmi_sim_eligible_main"]
+    .apply(lambda x: x.sum())
+    .unstack()
+    .std(axis=1) /
+    sim.groupby(["nuts_code", "year"])["rmi_sim_eligible_main"]
+    .apply(lambda x: x.sum())
+    .unstack()
+    .mean(axis=1)
+    )
+    print(obs_counts.sort_values("n_mean"))
 
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)

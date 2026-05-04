@@ -428,3 +428,77 @@ def make_region_summary_main(df: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows).sort_values(["year", "pct_gap"], ascending=[True, False])
+
+def diagnose_undersimulated_regions(
+    sim: pd.DataFrame,
+    regions: list[str],
+    years: list[int] | None = None,
+) -> None:
+    """
+    For each region and year, prints a gate-by-gate funnel showing where
+    households drop out of the main spec.
+    """
+    if years is None:
+        years = sorted(sim["year"].dropna().unique().astype(int).tolist())
+
+    for year in years:
+        g = sim[sim["year"].astype(int) == int(year)].copy()
+        if g.empty:
+            print(f"No data for year {year}. Available: {sim['year'].unique()}")
+            continue
+
+        print(f"\n{'='*80}")
+        print(f"GATE-BY-GATE DIAGNOSTIC — {year}")
+        print(f"{'='*80}")
+
+        for nuts in regions:
+            r = g[g["nuts_code"] == nuts]
+            if r.empty:
+                print(f"\n  {nuts} — no data for {year}")
+                continue
+
+            region_name = r["region_name_policy"].iloc[0]
+            w = r["weight_hh"]
+            total = w.sum()
+            observed = float(r["titulares"].iloc[0])
+
+            print(f"\n{region_name} ({nuts}) — observed: {observed:,.0f}")
+            print(f"  {'Gate':<40} {'Households':>12} {'% of total':>10} {'% of obs':>10}")
+            print(f"  {'-'*74}")
+
+            gates = [
+                ("Total sample",
+                    pd.Series(True, index=r.index)),
+                ("baseline_main_included",
+                    r["baseline_main_included"].fillna(False)),
+                ("amount_rule_available",
+                    r["rmi_amount_rule_available"].eq(1)),
+                ("age_eligible",
+                    r["rmi_age_eligible"].eq(1)),
+                ("claimant_proxy_eligible",
+                    r["rmi_claimant_proxy_eligible"].eq(1)),
+                ("income_gap before_transfers",
+                    r["rmi_income_eligible"].eq(1)),
+                ("income_after_transfers_eligible",
+                    r["income_after_transfers_eligible"].eq(1)),
+                ("income_before_transfers_eligible",
+                    r["income_before_transfers_eligible"].eq(1)),
+                ("wealth_soft",
+                    r["wealth_soft"].eq(1)),
+                ("wealth_strict",
+                    r["wealth_strict"].eq(1)),
+                ("labour_region_specific",
+                    r["labour_region_specific"].eq(1)),
+                ("hhtype_region_specific",
+                    r["hhtype_region_specific"].eq(1)),
+                ("rmi_sim_eligible permissive",
+                    r["rmi_sim_eligible"].eq(1)),
+                ("rmi_sim_eligible_main",
+                    r["rmi_sim_eligible_main"].eq(1)),
+            ]
+
+            for label, mask in gates:
+                n = w[mask].sum()
+                pct_total = 100 * n / total if total > 0 else 0
+                pct_obs   = 100 * n / observed if observed > 0 else 0
+                print(f"  {label:<40} {n:>12,.0f} {pct_total:>9.1f}% {pct_obs:>9.1f}%")

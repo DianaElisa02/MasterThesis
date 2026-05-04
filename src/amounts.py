@@ -247,12 +247,23 @@ def finalize_main_spec(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
 
+    is_guaranteed = out["nuts_code"].isin(["ES21", "ES22", "ES53", "ES13"])
+    out["income_concept_main"] = np.where(
+        is_guaranteed,
+        out["income_before_transfers_eligible"].fillna(0),
+        out["income_after_transfers_eligible"].fillna(0),
+    )
+
+    check = out.groupby("nuts_code")["income_concept_main"].mean()
+    check2 = out.groupby("nuts_code")["labour_gate_profile"].first()
+    print(pd.DataFrame({"labour_gate_profile": check2, "mean_income_concept_main": check}))
+
     conditions = (
         out["baseline_main_included"].fillna(False)
         & out["rmi_amount_rule_available"].eq(1)
         & out["rmi_age_eligible"].eq(1)
         & out["rmi_claimant_proxy_eligible"].eq(1)
-        & out["income_after_transfers_eligible"].eq(1)
+        & out["income_concept_main"].eq(1)
         & out["wealth_soft"].eq(1)
         & out["labour_region_specific"].eq(1)
         & out["hhtype_region_specific"].eq(1)

@@ -12,6 +12,7 @@ LABOUR_GATE_MAP: dict[str, tuple[str, str]] = {
     "ES21": ("none",     "Guaranteed income scheme (RGI); no labour status condition"),
     "ES22": ("none",     "Guaranteed income scheme (Renta Garantizada); no labour status condition"),
     "ES53": ("none",     "RESOGA guaranteed income regime; no labour status condition"),
+    "ES24": ("none",     "IAI covered broader population including precarious employment"),
     # standard — unemployed or nonworking required, no active search registration
     "ES41": ("standard", "Soft conditionality (Renta Garantizada de Ciudadanía); unemployed or nonworking, no search registration"),
     "ES62": ("standard", "Soft conditionality (Renta Básica de Inserción); unemployed or nonworking required"),
