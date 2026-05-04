@@ -238,7 +238,7 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "wealth_soft",
         "wealth_strict",
         "hhtype_no_restriction",
-        "hhtype_proxy_restricted",
+        "hhtype_region_specific",
         "hhtype_strict_household",
     ]
     existing = [c for c in preferred if c in df.columns]

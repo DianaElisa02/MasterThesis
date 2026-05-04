@@ -368,7 +368,7 @@ def make_income_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def make_household_type_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for version in ["no_restriction", "proxy_restricted", "strict_household"]:
+    for version in ["no_restriction", "region_specific", "strict_household"]:
         col = f"hhtype_{version}"
         for year, g in df.groupby("year"):
             eligible_w = g["rmi_sim_eligible"].eq(1) & g[col].eq(1)

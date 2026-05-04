@@ -190,25 +190,24 @@ def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
 
     rp1_unemployed = out["rp1_activity_status_detail"].astype("string").eq("unemployed")
     rp2_unemployed = out["rp2_activity_status_detail"].astype("string").eq("unemployed")
-    any_rp_unemployed = rp1_unemployed | rp2_unemployed
+    any_rp_unemployed = (rp1_unemployed | rp2_unemployed).fillna(False)
 
-    all_nonworking = out["all_working_age_nonworking"].eq(1)
+    all_nonworking = out["all_working_age_nonworking"].eq(1).fillna(False)
 
     rp1_not_refusing = (
         out["rp1_active_job_search"].eq(1) | out["rp1_active_job_search"].isna()
-    )
+    ).fillna(True)
     rp2_not_refusing = (
         out["rp2_active_job_search"].eq(1) | out["rp2_active_job_search"].isna()
-    )
+    ).fillna(True)
     any_rp_unemployed_not_refusing = (
         (rp1_unemployed & rp1_not_refusing) |
         (rp2_unemployed & rp2_not_refusing)
-    )
+    ).fillna(False)
 
-    # Convert all boolean conditions to numpy arrays to avoid np.select dtype issues
     gate_none     = np.ones(len(out), dtype=bool)
-    gate_standard = (any_rp_unemployed | all_nonworking).to_numpy()
-    gate_strict   = (any_rp_unemployed_not_refusing | all_nonworking).to_numpy()
+    gate_standard = (any_rp_unemployed | all_nonworking).to_numpy(dtype=bool)
+    gate_strict   = (any_rp_unemployed_not_refusing | all_nonworking).to_numpy(dtype=bool)
     rp_observed_np = rp_observed.to_numpy()
     profile_np     = out["labour_gate_profile"].astype("string").to_numpy()
 
@@ -307,6 +306,7 @@ def compute_household_type_versions(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     out["hhtype_no_restriction"] = 1.0
+    out["hhtype_region_specific"] = out["rmi_hhtype_eligible"].fillna(1.0)
 
     n_adults     = pd.to_numeric(out["n_adults_18plus"],    errors="coerce").fillna(0)
     n_working    = pd.to_numeric(out["n_working_18_64"],    errors="coerce").fillna(0)
@@ -315,14 +315,6 @@ def compute_household_type_versions(df: pd.DataFrame) -> pd.DataFrame:
     multi_unit_proxy = (
         (n_adults >= 3) &
         ((n_working >= 2) | (n_unemployed >= 2))
-    )
-
-    is_proxy_region = out["legal_unit_type"].fillna("").str.endswith("_proxy")
-
-    out["hhtype_proxy_restricted"] = np.where(
-        is_proxy_region,
-        (~multi_unit_proxy).astype(float),
-        1.0,
     )
 
     is_simple = (
