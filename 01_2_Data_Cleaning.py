@@ -231,38 +231,21 @@ def recode_sex(code: pd.Series) -> pd.Series:
 
 
 def recode_activity_status(tp: pd.DataFrame) -> pd.Series:
-    col = first_existing(tp, SCHEMA["tp"]["labour_status_detail"])
-    if col is None:
+    if "labour_status_detail" not in tp.columns:
         return empty_str(tp.index)
 
-    x = to_num(tp[col])
+    x = to_num(tp["labour_status_detail"])
 
     out = np.select(
         [
-            x.eq(1),
-            x.eq(2),
-            x.eq(3),
-            x.eq(4),
-            x.eq(5),
-            x.eq(6),
-            x.eq(7),
-            x.eq(8),
-            x.eq(9),
-            x.eq(10),
-            x.eq(11),
+            x.eq(1), x.eq(2), x.eq(3), x.eq(4), x.eq(5),
+            x.eq(6), x.eq(7), x.eq(8), x.eq(9), x.eq(10), x.eq(11),
         ],
         [
-            "employee_full_time",
-            "employee_part_time",
-            "selfemployed_full_time",
-            "selfemployed_part_time",
-            "unemployed",
-            "student",
-            "retired",
-            "permanently_disabled",
-            "military_service",
-            "home_care",
-            "other_inactive",
+            "employee_full_time", "employee_part_time",
+            "selfemployed_full_time", "selfemployed_part_time",
+            "unemployed", "student", "retired", "permanently_disabled",
+            "military_service", "home_care", "other_inactive",
         ],
         default=pd.NA,
     )
@@ -301,11 +284,6 @@ def derive_household_id_from_person_id(person_id: pd.Series) -> pd.Series:
     pid = to_id(person_id)
     return pid.str[:-2]
 
-
-def recode_activity_status_from_clean_tp(tp: pd.DataFrame) -> pd.Series:
-    return tp["labour_status_detail"]
-
-
 def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame | None:
     if not tr_path.exists():
         if STRICT_TR_REQUIRED:
@@ -321,15 +299,12 @@ def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame |
         source_path=tr_path,
     )
 
-    # Household ID: use direct household_id if available, otherwise derive from person_id.
     if "household_id" in tr.columns and tr["household_id"].notna().any():
         tr["household_id_source"] = "direct_from_tr"
     else:
         tr["household_id"] = derive_household_id_from_person_id(tr["person_id"])
         tr["household_id_source"] = "derived_from_person_id"
 
-    # Important: derive_age should now work from cleaned columns:
-    # age_current, age_income_ref, birth_year.
     tr["age"] = derive_age(tr, year)
 
     tr["sex"] = recode_sex(tr["sex"])
@@ -367,7 +342,7 @@ def load_person_clean(tr_path: Path, tp_path: Path, year: int) -> pd.DataFrame |
 
         # This should use the cleaned column "labour_status_detail",
         # not raw PL031 / PL032 columns.
-        tp["activity_status_detail"] = recode_activity_status_from_clean_tp(tp)
+        tp["activity_status_detail"] = recode_activity_status(tp)
         tp["activity_group"] = recode_activity_group(tp["activity_status_detail"])
 
         tp["active_job_search"] = recode_yes_no(tp["active_job_search"])
