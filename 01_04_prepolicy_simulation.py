@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from scipy.stats import spearmanr
+
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_gap,
@@ -198,7 +200,6 @@ def main() -> None:
     ascending=True,
     digits=3,
     )
-
 
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)
