@@ -326,7 +326,7 @@ def make_wealth_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def make_labour_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for version in ["no_gate", "unemployed_or_nonworking", "unemployed_searching"]:
+    for version in ["no_gate", "region_specific"]:
         col = f"labour_{version}"
         for year, g in df.groupby("year"):
             eligible_w = g["rmi_sim_eligible"].eq(1) & g[col].eq(1)

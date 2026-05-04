@@ -251,12 +251,7 @@ def apply_labour_status_gate(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     out["labour_no_gate"] = 1.0
-    out["labour_unemployed_or_nonworking"] = np.where(
-        rp_observed_np, gate_standard.astype(float), 1.0
-    )
-    out["labour_unemployed_searching"] = np.where(
-        rp_observed_np, gate_strict.astype(float), 1.0
-    )
+    out["labour_region_specific"] = out["rmi_labour_gate"].fillna(1.0)
 
     return out
 
