@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-
+import pandas as pd
 from src.amounts import (
     assign_guaranteed_amount,
     compute_income_concept_versions,
     compute_income_gap,
     finalize_entitlement,
+    finalize_main_spec,
 )
 from src.eligibility import (
     add_multi_nucleus_proxy,
@@ -38,6 +39,8 @@ from src.summaries import (
     make_labour_sensitivity_table,
     make_income_sensitivity_table,
     make_household_type_sensitivity_table,
+    make_year_summary_main,
+    make_region_summary_main,
 )
 
 BASE_PATH = Path(".").resolve()
@@ -60,6 +63,8 @@ OUTPUT_WEALTH   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_wealth_sensitivity.parque
 OUTPUT_LABOUR   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_labour_sensitivity.parquet"
 OUTPUT_INCOME = BASE_PATH / f"rmi_baseline_{RUN_TAG}_income_sensitivity.parquet"
 OUTPUT_HHTYPE = BASE_PATH / f"rmi_baseline_{RUN_TAG}_household_type_sensitivity.parquet"
+OUTPUT_YEAR_MAIN   = BASE_PATH / f"rmi_baseline_{RUN_TAG}_year_summary_main.parquet"
+OUTPUT_REGION_MAIN = BASE_PATH / f"rmi_baseline_{RUN_TAG}_region_summary_main.parquet"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
@@ -90,12 +95,8 @@ def main() -> None:
     sim = compute_wealth_versions(sim)
     sim = compute_income_concept_versions(sim)
     sim = compute_household_type_versions(sim)
-
-
+    sim = finalize_main_spec(sim)
     sim = reorder_columns(sim)
-
-
-
 
     year_summary = make_year_summary(sim)
     region_summary = make_region_summary(sim)
@@ -104,7 +105,7 @@ def main() -> None:
     labour_sensitivity = make_labour_sensitivity_table(sim)
     income_sensitivity = make_income_sensitivity_table(sim)
     hhtype_sensitivity = make_household_type_sensitivity_table(sim)
-
+    
     print("\n" + "=" * 80)
     print("PRE-POLICY RMI SIMULATION — RAW SIMULATED COUNTS")
     print("=" * 80)
@@ -191,6 +192,32 @@ def main() -> None:
     digits=3,
     )
 
+    year_summary_main   = make_year_summary_main(sim)
+    region_summary_main = make_region_summary_main(sim)
+
+    print("\n" + "=" * 80)
+    print("MAIN SPEC — AFTER TRANSFERS + WEALTH STRICT + LABOUR REGION + HHTYPE REGION")
+    print("=" * 80)
+    print_compact_table(
+        year_summary_main,
+        title="Main spec: simulated households vs observed titulares",
+        columns=["year", "weighted_total_simulated_main", "observed_titulares",
+                 "absolute_gap", "pct_gap"],
+        sort_by=["year"],
+        ascending=True,
+        digits=3,
+    )
+    for year in sorted(sim["year"].dropna().unique()):
+        print_compact_table(
+            region_summary_main.loc[region_summary_main["year"] == int(year)],
+            title=f"Main spec by region {int(year)}",
+            columns=["nuts_code", "region_name_policy", "weighted_total_simulated_main",
+                     "observed_titulares", "absolute_gap", "pct_gap"],
+            sort_by=["pct_gap"],
+            ascending=False,
+            digits=3,
+        )
+
     sim.to_parquet(OUTPUT_HH, index=False)
     sim.to_csv(OUTPUT_CSV, index=False)
     year_summary.to_parquet(OUTPUT_YEAR, index=False)
@@ -200,6 +227,8 @@ def main() -> None:
     labour_sensitivity.to_parquet(OUTPUT_LABOUR, index=False)
     income_sensitivity.to_parquet(OUTPUT_INCOME, index=False)
     hhtype_sensitivity.to_parquet(OUTPUT_HHTYPE, index=False)
+    year_summary_main.to_parquet(OUTPUT_YEAR_MAIN, index=False)
+    region_summary_main.to_parquet(OUTPUT_REGION_MAIN, index=False)
     logger.info("Saved household simulation file to %s", OUTPUT_HH)
     logger.info("Saved CSV copy to %s", OUTPUT_CSV)
     logger.info("Saved year summary to %s", OUTPUT_YEAR)
@@ -209,6 +238,8 @@ def main() -> None:
     logger.info("Saved labour sensitivity to %s", OUTPUT_LABOUR)
     logger.info("Saved income sensitivity to %s", OUTPUT_INCOME)
     logger.info("Saved household type sensitivity to %s", OUTPUT_HHTYPE)
+    logger.info("Saved main year summary to %s", OUTPUT_YEAR_MAIN)
+    logger.info("Saved main region summary to %s", OUTPUT_REGION_MAIN)
 
 if __name__ == "__main__":
     main()

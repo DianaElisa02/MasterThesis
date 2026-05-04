@@ -383,3 +383,48 @@ def make_household_type_sensitivity_table(df: pd.DataFrame) -> pd.DataFrame:
                 "gap_pct": safe_pct_gap(sim_hh, obs),
             })
     return pd.DataFrame(rows).sort_values(["year", "hhtype_version"])
+
+def make_year_summary_main(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for year, g in df.groupby("year"):
+        simulated_total = g.loc[
+            g["rmi_positive_entitlement_main"] == 1, "weight_hh"
+        ].sum()
+
+        coverage_year = g[["nuts_code", "titulares"]].drop_duplicates()
+        titulares_year = coverage_year["titulares"].sum()
+
+        rows.append(
+            {
+                "year": year,
+                "weighted_total_simulated_main": simulated_total,
+                "observed_titulares": titulares_year,
+                "absolute_gap": simulated_total - titulares_year,
+                "pct_gap": safe_pct_gap(simulated_total, titulares_year),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("year")
+
+
+def make_region_summary_main(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for (nuts_code, year), g in df.groupby(["nuts_code", "year"]):
+        simulated_total = g.loc[
+            g["rmi_positive_entitlement_main"] == 1, "weight_hh"
+        ].sum()
+
+        region = g["region_name_policy"].dropna().unique()[0]
+        titulares = float(g["titulares"].dropna().unique()[0])
+
+        rows.append(
+            {
+                "nuts_code": nuts_code,
+                "region_name_policy": region,
+                "year": int(year),
+                "weighted_total_simulated_main": simulated_total,
+                "observed_titulares": titulares,
+                "absolute_gap": simulated_total - titulares,
+                "pct_gap": safe_pct_gap(simulated_total, titulares),
+            }
+        )
+    return pd.DataFrame(rows).sort_values(["year", "pct_gap"], ascending=[True, False])

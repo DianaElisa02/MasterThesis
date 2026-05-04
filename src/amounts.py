@@ -228,3 +228,44 @@ def finalize_entitlement(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+
+
+def finalize_main_spec(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Computes rmi_sim_eligible_main — the main exposure index specification.
+
+    Applies four historically grounded restrictions on top of the permissive
+    baseline (rmi_sim_eligible):
+
+    - after_transfers income concept: resources include all transfers
+    - wealth_strict: excludes households with detected capital/rental/wealth income
+    - labour_region_specific: correct labour condition per region
+    - hhtype_region_specific: correct household type rule per region
+
+    rmi_sim_eligible remains the permissive upper bound for sensitivity analysis.
+    rmi_sim_eligible_main is used to construct the primary exposure index.
+    """
+    out = df.copy()
+
+    conditions = (
+        out["baseline_main_included"].fillna(False)
+        & out["rmi_amount_rule_available"].eq(1)
+        & out["rmi_age_eligible"].eq(1)
+        & out["rmi_claimant_proxy_eligible"].eq(1)
+        & out["income_after_transfers_eligible"].eq(1)
+        & out["wealth_soft"].eq(1)
+        & out["labour_region_specific"].eq(1)
+        & out["hhtype_region_specific"].eq(1)
+    )
+
+    out["rmi_sim_eligible_main"] = np.where(conditions, 1.0, 0.0)
+
+    out["rmi_positive_entitlement_main"] = np.where(
+        out["rmi_sim_eligible_main"].eq(1)
+        & out["rmi_income_gap_entitlement_monthly"].notna()
+        & out["rmi_income_gap_entitlement_monthly"].gt(0),
+        1.0,
+        0.0,
+    )
+
+    return out
