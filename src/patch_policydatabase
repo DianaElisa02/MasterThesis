@@ -1,0 +1,65 @@
+
+from __future__ import annotations
+from pathlib import Path
+import pandas as pd
+
+LABOUR_GATE_MAP: dict[str, tuple[str, str]] = {
+    # strict — explicit active search / jobseeker registration required
+    "ES61": ("strict",   "Explicit insertion conditionality; claimant must be registered jobseeker (Informe RMI 2017 Cuadro 3-2)"),
+    "ES70": ("strict",   "All employable members must register as jobseekers per scheme rules (Prestación Canaria de Inserción)"),
+    "ES42": ("strict",   "Explicit insertion conditionality; active search registration required (Ingreso Mínimo de Solidaridad CLM)"),
+    # none — guaranteed income, no labour status condition
+    "ES21": ("none",     "Guaranteed income scheme (RGI); no labour status condition"),
+    "ES22": ("none",     "Guaranteed income scheme (Renta Garantizada); no labour status condition"),
+    "ES53": ("none",     "RESOGA guaranteed income regime; no labour status condition"),
+    # standard — unemployed or nonworking required, no active search registration
+    "ES41": ("standard", "Soft conditionality (Renta Garantizada de Ciudadanía); unemployed or nonworking, no search registration"),
+    "ES62": ("standard", "Soft conditionality (Renta Básica de Inserción); unemployed or nonworking required"),
+    "ES23": ("standard", "RC standard conditionality; unemployed or nonworking required"),
+}
+ 
+# Default for all other regions
+DEFAULT_PROFILE = ("standard", "Classic RMI; RP must be unemployed or all working-age members nonworking")
+ 
+ 
+def patch(path: Path) -> None:
+    if not path.exists():
+        print(f"  SKIP — not found: {path}")
+        return
+ 
+    if path.suffix == ".parquet":
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
+ 
+    df["labour_gate_profile"] = df["nuts_code"].map(
+        lambda x: LABOUR_GATE_MAP.get(x, DEFAULT_PROFILE)[0]
+    )
+    df["labour_gate_profile_note"] = df["nuts_code"].map(
+        lambda x: LABOUR_GATE_MAP.get(x, DEFAULT_PROFILE)[1]
+    )
+ 
+    if path.suffix == ".parquet":
+        df.to_parquet(path, index=False)
+    else:
+        df.to_csv(path, index=False)
+ 
+    print(f"  PATCHED: {path}  ({len(df)} rows)")
+    print(df[["nuts_code", "labour_gate_profile"]].drop_duplicates().sort_values("nuts_code").to_string(index=False))
+    print()
+ 
+ 
+def main() -> None:
+    base = Path(".")
+    targets = [
+        base / "policy_db" / "rmi_baseline_rules.parquet",
+        base / "policy_db" / "rmi_baseline_rules.csv",
+    ]
+    for t in targets:
+        patch(t)
+    print("Done. Re-run your simulation pipeline after patching.")
+ 
+ 
+if __name__ == "__main__":
+    main()
+ 
