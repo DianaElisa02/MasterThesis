@@ -5,7 +5,7 @@ import pandas as pd
 
 REGIONAL_MIN_ENTITLEMENT: dict[str, float] = {
     "ES11": 53.78,   # Galicia — Informe RMI 2017, Cuadro 2
-    "ES12": 44.30,   # Asturias — Informe RMI 2017, Cuadro 2
+    "ES12": 00.00,   # Asturias — Informe RMI 2017, Cuadro 2
     "ES13": 30.32,   # Cantabria — Informe RMI 2017, Cuadro 2
     "ES21": 0.00,    # Basque Country — no minimum listed
     "ES22": 0.00,    # Navarra — no minimum listed

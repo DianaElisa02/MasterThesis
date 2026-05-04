@@ -123,7 +123,7 @@ def main() -> None:
     columns=[
         "year",
         "weighted_total_simulated_households",
-        "observed_titulares",
+        "observed_titulares_2017",
         "absolute_gap_sim_minus_titulares",
         "pct_gap_vs_titulares",
     ],
@@ -139,7 +139,7 @@ def main() -> None:
             columns=[
                 "nuts_code",
                 "region_name_policy",
-                "observed_titulares",
+                "observed_titulares_2017",
                 "simulated_households",
                 "abs_gap",
                 "pct_gap",
@@ -158,7 +158,7 @@ def main() -> None:
     print_compact_table(
     wealth_sensitivity,
     title="Simulated households by wealth version and year",
-    columns=["wealth_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    columns=["wealth_version", "year", "simulated_households", "observed_titulares_2017", "gap_pct"],
     sort_by=["year", "wealth_version"],
     ascending=True,
     digits=3,
@@ -170,7 +170,7 @@ def main() -> None:
     print_compact_table(
     labour_sensitivity,
     title="Simulated households by labour gate version and year",
-    columns=["labour_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    columns=["labour_version", "year", "simulated_households", "observed_titulares_2017", "gap_pct"],
     sort_by=["year", "labour_version"],
     ascending=True,
     digits=3,
@@ -182,7 +182,7 @@ def main() -> None:
     print_compact_table(
     income_sensitivity,
     title="Simulated households by income concept and year",
-    columns=["income_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    columns=["income_version", "year", "simulated_households", "observed_titulares_2017", "gap_pct"],
     sort_by=["year", "income_version"],
     ascending=True,
     digits=3,
@@ -194,7 +194,7 @@ def main() -> None:
     print_compact_table(
     hhtype_sensitivity,
     title="Simulated households by household type version and year",
-    columns=["hhtype_version", "year", "simulated_households", "observed_titulares", "gap_pct"],
+    columns=["hhtype_version", "year", "simulated_households", "observed_titulares_2017", "gap_pct"],
     sort_by=["year", "hhtype_version"],
     ascending=True,
     digits=3,
@@ -209,7 +209,7 @@ def main() -> None:
     print_compact_table(
         year_summary_main,
         title="Main spec: simulated households vs observed titulares",
-        columns=["year", "weighted_total_simulated_main", "observed_titulares",
+        columns=["year", "weighted_total_simulated_main", "observed_titulares_2017",
                  "absolute_gap", "pct_gap"],
         sort_by=["year"],
         ascending=True,
@@ -220,7 +220,7 @@ def main() -> None:
             region_summary_main.loc[region_summary_main["year"] == int(year)],
             title=f"Main spec by region {int(year)}",
             columns=["nuts_code", "region_name_policy", "weighted_total_simulated_main",
-                     "observed_titulares", "absolute_gap", "pct_gap"],
+                     "observed_titulares_2017", "absolute_gap", "pct_gap"],
             sort_by=["pct_gap"],
             ascending=False,
             digits=3,
